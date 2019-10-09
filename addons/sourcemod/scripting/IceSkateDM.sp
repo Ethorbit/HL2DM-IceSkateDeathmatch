@@ -18,9 +18,7 @@ public Plugin:myinfo =
 #include <convars>
 
 new ISDM_MaxPlayers;
-new PlayerJumpCounters[MAXPLAYERS + 1];
-new PlayerResetCounterTimers[MAXPLAYERS + 1];
-new PlayerResetClearTimers[MAXPLAYERS + 1];
+new Float:PlyInitialHeight[MAXPLAYERS + 1];
 new Float:MAXSLOWSPEED;
 new Float:MAXAIRHEIGHT;
 new Float:SPEED1SPEED;
@@ -59,7 +57,7 @@ public void OnPluginStart() {
     ISDM_PerkVars[FastPerk1SpeedConVar] = CreateConVar("ISDM_FastPerk1Speed", "600.0", "The maximum speed players can go to get Fast Perk #1", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[FastPerk2SpeedConVar] = CreateConVar("ISDM_FastPerk2Speed", "800.0", "The maximum speed players can go to get Fast Perk #2", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[FastPerk3SpeedConVar] = CreateConVar("ISDM_FastPerk3Speed", "1100.0", "The maximum speed players can go to get Fast Perk #3", FCVAR_SERVER_CAN_EXECUTE);
-    ISDM_PerkVars[AirPerkHeightConVar] = CreateConVar("ISDM_AirPerkHeight", "70.0", "The minimum height speed players need to go before they get Air Perk", FCVAR_SERVER_CAN_EXECUTE);
+    ISDM_PerkVars[AirPerkHeightConVar] = CreateConVar("ISDM_AirPerkHeight", "50.0", "The minimum height speed players need to go before they get Air Perk", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_UpdatePerkVars();
 
     new const perkvar[5] = {SlowPerkSpeedConVar, FastPerk1SpeedConVar, FastPerk2SpeedConVar, FastPerk3SpeedConVar, AirPerkHeightConVar}; 
@@ -72,9 +70,7 @@ public void OnPluginStart() {
     }
 
     for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
-        PlayerJumpCounters[i] = 0; 
-        PlayerResetCounterTimers[i] = INVALID_HANDLE;
-        PlayerResetClearTimers[i] = INVALID_HANDLE;
+        PlyInitialHeight[i] = 0.0;
     }
 }
 
@@ -139,6 +135,42 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             } else {
                 ISDM_DelFromArray(ISDM_Perks[ISDM_NoPerks], client);
             }
+
+    /////////////////////////////////////////////////////////////////////////////
+    //////////////////////////// ISDM AIR LOGIC (& perk) ///////////////////////////////////////
+            if (NotOnGround) { // Apply air perk
+                new Float:plyPos[3];
+                new Float:ThingBelowPly[3];
+                GetClientAbsOrigin(client, plyPos);
+                new Handle:TraceZ = TR_TraceRayFilterEx(plyPos, {90.0, 0.0, 0.0}, MASK_PLAYERSOLID, RayType_Infinite, TraceEntityFilterPlayer);
+
+                if (TR_DidHit(TraceZ)) { // Kinda useless since it will always hit, but better safe than sorry
+                    TR_GetEndPosition(ThingBelowPly, TraceZ);          
+                    new Float:PlyDistanceToGround = GetVectorDistance(plyPos, ThingBelowPly);
+
+                    if (PlyInitialHeight[client] == 0.0) {
+                        PlyInitialHeight[client] = PlyDistanceToGround;
+                    }
+
+                    if (PlyInitialHeight[client] > 300) { // Make it seem like they are NOT being sucked into the ground when falling from high up
+                        SetEntPropFloat(client, Prop_Data, "m_flGravity", 2.3); 
+                    } else {
+                        if (PlyDistanceToGround > MAXAIRHEIGHT) { // They are officially in the air now
+                            ISDM_AddPerk(client, ISDM_Perks[ISDM_AirPerk]);
+                            ISDM_UpdatePerks(client);
+                        }
+
+                        new GravityEquation = (GetVectorDistance(plyPos, ThingBelowPly) / 60.0); // The higher you are the more brutal the gravity increases (Unless you start falling from high up already)               
+                        if (GravityEquation > 1) { // Make sure low gravity never occurs
+                            SetEntPropFloat(client, Prop_Data, "m_flGravity", GravityEquation);   
+                        }     
+                    }
+                }
+            } else { // If player is on the ground
+                ISDM_DelFromArray(ISDM_Perks[ISDM_AirPerk], client);
+                SetEntPropFloat(client, Prop_Data, "m_flGravity", 1.0);
+                PlyInitialHeight[client] = 0.0;
+            }          
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// SLOW PERK //////////////////////////////////////
             if (IsSlowX && IsSlowY && !IsHigh) { // Apply slow perk
@@ -172,17 +204,9 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 ISDM_DelFromArray(ISDM_Perks[ISDM_SpeedPerk3], client);
             }
     /////////////////////////////////////////////////////////////////////////////
-    //////////////////////////// AIR PERK ///////////////////////////////////////
-        if (NotOnGround) { // Apply air perk
-               ISDM_AddPerk(client, ISDM_Perks[ISDM_AirPerk]);
-               ISDM_UpdatePerks(client);
-            } else {
-                ISDM_DelFromArray(ISDM_Perks[ISDM_AirPerk], client);
-            }
-    /////////////////////////////////////////////////////////////////////////////
     /////////////////////////// BASIC ISDM PLAYER LOGIC /////////////////////////       
-            if (buttons & IN_JUMP && !NotOnGround) { // Check if player is actually jumping   
-                ISDM_IncrementJumpCounter(client); // Start altering their gravity based on jump count
+            if (buttons & IN_JUMP) { 
+                buttons &= ~IN_JUMP;
                 return Plugin_Continue; 
             } 
 
@@ -191,7 +215,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 if (buttons & IN_MOVELEFT || buttons & IN_MOVERIGHT) { // Player is skating   
                     float direction[3];
                     NormalizeVector(currentSpeed, direction);
-                    ScaleVector(direction, 5.0);
+                    ScaleVector(direction, 10.0);
                     AddVectors(currentSpeed, direction, currentSpeed);
                     TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, currentSpeed); 
                     return Plugin_Continue; 
@@ -210,60 +234,21 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
     return Plugin_Continue;
 }
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////// ISDM JUMP COUNTER STUFF /////////////////////////
-public void ISDM_IncrementJumpCounter(client) {
-    if (IsValidHandle(PlayerResetCounterTimers[client])) { // Kill any reset timers if they've jumped again else it will spam timers
-        KillTimer(PlayerResetCounterTimers[client]);
-    }
-
-    if (IsValidHandle(PlayerResetClearTimers[client])) { // Kill any reset timers if they've jumped again else it will spam timers
-        KillTimer(PlayerResetClearTimers[client]);
-    }
-
-    if (PlayerJumpCounters[client] >= 5) { // After 5 jumps the player can't move anymore. Do nothing and reset after 3 second delay
-        PlayerResetClearTimers[client] = CreateTimer(3.0, ISDM_ClearJumpCounter, client);
-    } else {
-        PlayerJumpCounters[client]++;
-    }
-
-    new Handle:MultiData = CreateDataPack();
-    WritePackCell(MultiData, client);
-    WritePackCell(MultiData, PlayerJumpCounters[client]);
-    PlayerResetCounterTimers[client] = CreateTimer(3.0, ISDM_ResetJumpCounter, MultiData); // Reset their jump counter if they stopped jumping
-    
-    ISDM_AlterPlyGravity(client, PlayerJumpCounters[client]); // Their gravity will now change based on their jump counter
-}
-
-public Action:ISDM_ClearJumpCounter(Handle:timer, any:client) { // Simply set their counter back to 0
-    PlayerJumpCounters[client] = 0; // Reset their jump counter
-    ISDM_AlterPlyGravity(client, 0); // Reset their gravity back to normal too
-}
-
-public Action:ISDM_ResetJumpCounter(Handle:timer, Handle:data) { // Different than Clear, it resets if they haven't jumped again since
-    ResetPack(data);
-
-    if (IsPackReadable(data, 1)) {  
-        new int:client = ReadPackCell(data);
-        new int:jumpVal = ReadPackCell(data);
-        if (jumpVal == PlayerJumpCounters[client]) { // Check if they haven't jumped yet
-           PlayerJumpCounters[client] = 0;
-        }
-    }
-}
+public bool:TraceEntityFilterPlayer(entity, contentsMask)
+{
+    return entity <= 0 || entity > MaxClients;
+} 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////// ISDM GRAVITY STUFF ////////////////////////////
+/////////////////////////// ISDM GRAVITY LOGIC ////////////////////////////
 public void ISDM_AlterPlyGravity(client, jumpVal) {
-    if (jumpVal > 1) {
-        new GravityEquation = (jumpVal / 10.0 + 1.5);
-        if (jumpVal == 5) { // They've hit their jump limit, make their jumps ineffective
-            SetEntPropFloat(client, Prop_Data, "m_flGravity", 5.0);
-        } else {
+    if (jumpVal == 0) {
+        SetEntPropFloat(client, Prop_Data, "m_flGravity", 1.0);
+    } else if (jumpVal > 0) {
+        new GravityEquation = (jumpVal / 10.0 + 1.0);
             SetEntPropFloat(client, Prop_Data, "m_flGravity", GravityEquation);
         }
     }
-}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////// ISDM PERK STUFF ////////////////////////////////
