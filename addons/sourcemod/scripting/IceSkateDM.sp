@@ -1,8 +1,8 @@
 // Ice Skate Deathmatch is a thing now thanks to Himanshu's choice of commands :)
 
 // TODO:
+// Scale gravity by player's velocity as well so that they never get outside the bounds of the map
 // Make unusually slow at first, but gain speed over time at an unusal rate
-// Make gravity gradually go higher and higher based on the distance you go above the ground
 
 public Plugin:myinfo =
 {
@@ -17,8 +17,25 @@ public Plugin:myinfo =
 #include <sdkhooks>
 #include <convars>
 
+new String:ISDM_MaterialDirectory[] = "IceSkateDM" // The directory in the materials folder where the gamemode's materials are in
+new String:ISDM_Materials[8][58] = { // The materials the gamemode uses
+    "slowperk", 
+    "1speedperk", 
+    "1speedperkandair", 
+    "2speedperks", 
+    "2speedperksandair", 
+    "allspeedperks",
+    "allspeedperksandair",
+    "airperk"
+}
+
 new ISDM_MaxPlayers;
+new Handle:AddPlySkate[MAXPLAYERS + 1];
+new Handle:ResetPlySkates[MAXPLAYERS + 1];
+new Float:PlySkates[MAXPLAYERS + 1];
 new Float:PlyInitialHeight[MAXPLAYERS + 1];
+bool SkatedLeft[MAXPLAYERS + 1];
+bool SkatedRight[MAXPLAYERS + 1];
 new Float:MAXSLOWSPEED;
 new Float:MAXAIRHEIGHT;
 new Float:SPEED1SPEED;
@@ -46,9 +63,9 @@ enum PerkConVars
 
 new ISDM_Perks[Perks];
 new ISDM_PerkVars[PerkConVars];
-new const PerkIncrement[6] = {ISDM_NoPerks, ISDM_SlowPerk, ISDM_AirPerk, ISDM_SpeedPerk1, ISDM_SpeedPerk2, ISDM_SpeedPerk3};
 
 public void OnPluginStart() {
+    
     ISDM_MaxPlayers = GetMaxClients();   
     SetConVarFloat(FindConVar("sv_friction"), 1.0, false, false); // No other way found so far to allow players to slide :(
     SetConVarFloat(FindConVar("sv_accelerate"), 100.0, false, false); // Very much optional, playable without it
@@ -60,17 +77,34 @@ public void OnPluginStart() {
     ISDM_PerkVars[AirPerkHeightConVar] = CreateConVar("ISDM_AirPerkHeight", "50.0", "The minimum height speed players need to go before they get Air Perk", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_UpdatePerkVars();
 
+    for (new i = 0; i < sizeof(ISDM_Materials); i++) { // Loop through all Ice Skate Deathmatch materials and force clients to download them
+        int MaxMatLength = 58;
+        new String:VTFs[MaxMatLength];
+        new String:VMTs[MaxMatLength];
+        Format(VTFs, MaxMatLength, "materials/%s/%s.vtf", ISDM_MaterialDirectory, ISDM_Materials[i]);
+        Format(VMTs, MaxMatLength, "materials/%s/%s.vmt", ISDM_MaterialDirectory, ISDM_Materials[i]);
+        AddFileToDownloadsTable(VTFs);
+        AddFileToDownloadsTable(VMTs);
+        PrecacheDecal(VTFs);
+    }
+
     new const perkvar[5] = {SlowPerkSpeedConVar, FastPerk1SpeedConVar, FastPerk2SpeedConVar, FastPerk3SpeedConVar, AirPerkHeightConVar}; 
-    for (new i = 0; i < 5; i++) { // Loop through each perk convar and hook it to the ISDM_PerkChanged() function
+    for (new i = 0; i < sizeof(perkvar); i++) { // Loop through each perk convar and hook it to the ISDM_PerkChanged() function
         HookConVarChange(ISDM_PerkVars[perkvar[i]], ISDM_PerkChanged);
     }
 
-    for (new i = 0; i < 6; i++) { // Loop through each perk and assign it to an array
+    new const PerkIncrement[6] = {ISDM_NoPerks, ISDM_SlowPerk, ISDM_AirPerk, ISDM_SpeedPerk1, ISDM_SpeedPerk2, ISDM_SpeedPerk3};
+    for (new i = 0; i < sizeof(PerkIncrement); i++) { // Loop through each perk and assign it to an array
         ISDM_Perks[PerkIncrement[i]] = CreateArray(32);
     }
 
     for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
         PlyInitialHeight[i] = 0.0;
+        PlySkates[i] = 0.0;
+        AddPlySkate[i] = INVALID_HANDLE;
+        ResetPlySkates[i] = INVALID_HANDLE;
+        SkatedRight[i] = false;
+        SkatedLeft[i] = false;
     }
 }
 
@@ -102,6 +136,9 @@ public OnEntityCreated(entity, const String:classname[]) {
 
 public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], float angles[3])   
 {
+    new Float:currentPos[3];
+    GetClientAbsOrigin(client, currentPos);
+
     if (GetEntityMoveType(client) != MOVETYPE_NOCLIP) { // Make sure noclipping players don't skate or get perks, that could be annoying for admins
         if (!IsPlayerAlive(client)) {
             ClientCommand(client, "r_screenoverlay 0"); // Reset perks since they died
@@ -140,8 +177,8 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
     //////////////////////////// ISDM AIR LOGIC (& perk) ///////////////////////////////////////
             if (NotOnGround) { // Apply air perk
                 new Float:plyPos[3];
-                new Float:ThingBelowPly[3];
-                GetClientAbsOrigin(client, plyPos);
+                new Float:ThingBelowPly[3];   
+                GetClientAbsOrigin(client, plyPos);     
                 new Handle:TraceZ = TR_TraceRayFilterEx(plyPos, {90.0, 0.0, 0.0}, MASK_PLAYERSOLID, RayType_Infinite, TraceEntityFilterPlayer);
 
                 if (TR_DidHit(TraceZ)) { // Kinda useless since it will always hit, but better safe than sorry
@@ -160,8 +197,8 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                             ISDM_UpdatePerks(client);
                         }
 
-                        new GravityEquation = (GetVectorDistance(plyPos, ThingBelowPly) / 60.0); // The higher you are the more brutal the gravity increases (Unless you start falling from high up already)               
-                        if (GravityEquation > 1) { // Make sure low gravity never occurs
+                        new Float:GravityEquation = (GetVectorDistance(plyPos, ThingBelowPly) / 60.0); // The higher you are the more brutal the gravity increases (Unless you start falling from high up already)               
+                        if (GravityEquation > 1.0) { // Make sure low gravity never occurs
                             SetEntPropFloat(client, Prop_Data, "m_flGravity", GravityEquation);   
                         }     
                     }
@@ -210,26 +247,69 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 return Plugin_Continue; 
             } 
 
+            new Float:TheirSkates = PlySkates[client];
+           // PrintToChat(client, "Current skates achieved: %f", TheirSkates);
             if (buttons & 1 << 9 && buttons & 1 << 10 ) { // They are not skating they are just moving left and right at the same time...
             } else {
-                if (buttons & IN_MOVELEFT || buttons & IN_MOVERIGHT) { // Player is skating   
-                    float direction[3];
-                    NormalizeVector(currentSpeed, direction);
-                    ScaleVector(direction, 10.0);
-                    AddVectors(currentSpeed, direction, currentSpeed);
-                    TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, currentSpeed); 
-                    return Plugin_Continue; 
-                } else {      
+                // int Left = SkateLeft[client];
+                // int Right = SkateRight[client];
+
+                //PrintToServer("Their right amount: %i Their left amount: %i", SkatedRight[client], SkatedLeft[client]);
+
+                if (buttons & IN_MOVELEFT) {
+                    if (!IsValidHandle(AddPlySkate[client])) {
+                        if (SkatedLeft[client] == false) { // Make sure they are switching between left and right
+                            AddPlySkate[client] = CreateTimer(0.1, ISDM_IncrementSkate, client);
+                        } else { // They failed to skate properly
+                            //ISDM_LoseSpeed(client);
+                            PrintToServer("Losing speed");
+                        }
+                    }
+                }
+
+                if (buttons & IN_MOVERIGHT) {
+                    if (!IsValidHandle(AddPlySkate[client])) {
+                        if (SkatedRight[client] == false) { // Make sure they are switching between left and right
+                            AddPlySkate[client] = CreateTimer(0.1, ISDM_IncrementSkate, client);
+                        } else { // They failed to skate properly
+                            //ISDM_LoseSpeed(client);
+                            PrintToServer("Losing speed");
+                        }
+                    }
+                }
+
+                if (buttons & IN_MOVELEFT || buttons & IN_MOVERIGHT) { // Player is skating                      
+                    if (TheirSkates > 0) {
+                        float direction[3];
+                        NormalizeVector(currentSpeed, direction);
+                        ScaleVector(direction, TheirSkates);
+                        AddVectors(currentSpeed, direction, currentSpeed);
+                        TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, currentSpeed); 
+                        return Plugin_Continue; 
+                    }
+                } else { // The player is not skating   
                     if (x < 150 && y < 150 && x > 0 && y > 0) {  // They haven't really skated     
                         x = x / 2;
                         y = y / 2;
                         TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, currentSpeed); // Make them slower unless they are skating
                         return Plugin_Continue; 
                     } 
-                }
+
+                    if (PlySkates[client] > 0.0) {
+                        if (!IsValidHandle(ResetPlySkates[client])) {
+                            new Handle:theData = CreateDataPack();
+                            WritePackCell(theData, client);
+                            WritePackFloat(theData, currentPos[0]);
+                            WritePackFloat(theData, currentPos[1]);
+                            ResetPlySkates[client] = CreateTimer(0.5, ISDM_ResetSkates, theData);
+                        }
+                    }
+                }             
             } 
         }
     }
+
+    
 
     return Plugin_Continue;
 }
@@ -239,16 +319,51 @@ public bool:TraceEntityFilterPlayer(entity, contentsMask)
     return entity <= 0 || entity > MaxClients;
 } 
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////// ISDM GRAVITY LOGIC ////////////////////////////
-public void ISDM_AlterPlyGravity(client, jumpVal) {
-    if (jumpVal == 0) {
-        SetEntPropFloat(client, Prop_Data, "m_flGravity", 1.0);
-    } else if (jumpVal > 0) {
-        new GravityEquation = (jumpVal / 10.0 + 1.0);
-            SetEntPropFloat(client, Prop_Data, "m_flGravity", GravityEquation);
-        }
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////// ISDM SKATE LOGIC //////////////////////////////////
+public Action:ISDM_IncrementSkate(Handle:timer, any:client) {
+    PlySkates[client]++;
+    AddPlySkate[client] = INVALID_HANDLE; // Timer finished so let it occur again
+
+    if (GetClientButtons(client) & IN_MOVELEFT) {
+        SkatedRight[client] = false;
+        SkatedLeft[client] = true;
+        
+        //PrintCenterText(client, "       ⫸");
     }
+
+    if (GetClientButtons(client) & IN_MOVERIGHT) {
+        SkatedLeft[client] = false;
+        SkatedRight[client] = true;
+        //PrintCenterText(client, "⫷      ");
+    }
+}
+
+public void ISDM_LoseSpeed(client) {
+    PlySkates[client] = PlySkates[client] - 2;
+    SkatedLeft[client] = false;
+    SkatedRight[client] = false;
+} 
+
+public Action:ISDM_ResetSkates(Handle:timer, Handle:data) { // Reset their speed if they failed to maintain skating
+    ResetPack(data);
+    if (IsPackReadable(data, 1)) {
+        new Float:OldPos[3]; 
+        new client = ReadPackCell(data);
+        PlySkates[client]--;
+
+        OldPos[0] = ReadPackFloat(data);
+        OldPos[1] = ReadPackFloat(data);
+        
+        new Float:currentPos[3];
+        GetClientAbsOrigin(client, currentPos);
+
+        
+        // if (GetVectorDistance(OldPos, currentPos) < 50.0) {
+        //     PlySkates[client]--; // They are hardly moving, lower their skate amount
+        // }
+    }
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////// ISDM PERK STUFF ////////////////////////////////
