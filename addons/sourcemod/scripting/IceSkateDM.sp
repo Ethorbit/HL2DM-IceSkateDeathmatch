@@ -351,6 +351,26 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
     return Plugin_Continue;
 }
 
+public bool:TraceEntityFilterPlayer(entity, contentsMask)
+{
+    return entity <= 0 || entity > MaxClients;
+} 
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////// ISDM SKATE LOGIC //////////////////////////////////
+public Action:ISDM_IncrementSkate(Handle:timer, any:client) {   
+    if (GetClientButtons(client) & 1 << 9 && GetClientButtons(client) & 1 << 10 ) {
+    } else {
+        if (PlySkates[client] < 8) { // Give them an easy chance to skate fast
+            PlySkates[client] = PlySkates[client] + 3;
+        } else if (PlySkates[client] < 20) {
+            PlySkates[client]++; // They are pretty fast now, start adding normal speed boosts
+        } else {
+            PlySkates[client] = PlySkates[client] + 0.5; // They are going super fast, add smaller speed boosts
+        }
+    }
+}
+
 public Action:ISDM_AddKeyTime(Handle:timer, any:client) {
     if (GetClientButtons(client) & IN_MOVELEFT) {
         ElapsedLeftTime[client]++;
@@ -370,48 +390,6 @@ public Action:ISDM_AddDirection(Handle:timer, any:client) {
     if (GetClientButtons(client) & IN_MOVERIGHT) {
         SkatedRight[client] = true;
         SkatedLeft[client] = false;
-    }
-}
-
-public bool:TraceEntityFilterPlayer(entity, contentsMask)
-{
-    return entity <= 0 || entity > MaxClients;
-} 
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////// ISDM SKATE LOGIC //////////////////////////////////
-public Action:ISDM_IncrementSkate(Handle:timer, any:client) {   
-    if (GetClientButtons(client) & 1 << 9 && GetClientButtons(client) & 1 << 10 ) {
-    } else {
-        if (!SkatedRight[client] && SkatedLeft[client]) {
-            if (!IsValidHandle(ResolveDirectionsLeft[client]) && !IsValidHandle(ResolveDirectionsRight[client])) {
-                new Handle:data = CreateDataPack();
-                WritePackCell(data, client);
-                WritePackString(data, "Right");
-                ResolveDirectionsRight[client] = CreateTimer(1.0, ISDM_ResolveDirections, data);
-            } 
-        } else {
-            ResolveDirectionsRight[client] = INVALID_HANDLE;
-        }
-
-        if (!SkatedLeft[client] && SkatedRight[client]) {
-            if (!IsValidHandle(ResolveDirectionsLeft[client]) && !IsValidHandle(ResolveDirectionsLeft[client])) {
-                new Handle:data = CreateDataPack();
-                WritePackCell(data, client);
-                WritePackString(data, "Left");
-                ResolveDirectionsLeft[client] = CreateTimer(1.0, ISDM_ResolveDirections, data);
-            }
-        } else {
-            ResolveDirectionsLeft[client] = INVALID_HANDLE;
-        }
-
-        if (PlySkates[client] < 8) { // Give them an easy chance to skate fast
-            PlySkates[client] = PlySkates[client] + 3;
-        } else if (PlySkates[client] < 20) {
-            PlySkates[client]++; // They are pretty fast now, start adding normal speed boosts
-        } else {
-            PlySkates[client] = PlySkates[client] + 0.5; // They are going super fast, add smaller speed boosts
-        }
     }
 }
 
@@ -538,32 +516,6 @@ public void ISDM_UpdatePerks(client) {
             }
     }
 }
-
-public Action:ISDM_ResolveDirections(Handle:timer, Handle:data) {
-    ResetPack(data);
-    if (IsPackReadable(data, 1)) {
-        int client = ReadPackCell(data);
-        new String:Direction[5];
-        ReadPackString(data, Direction, 5);
-     
-        if (strcmp(Direction, "Left") == 0 && !SkatedRight[client]) {
-            SkatedRight[client] = true;
-
-            // if (!IsValidHandle(AllowDirections[client])) {
-            //     //BlockDirections[client] = true;
-            //     AllowDirections[client] = CreateTimer(0.1, ISDM_UnblockDirections, client);
-            // }
-        }
-
-        if (strcmp(Direction, "Right") == 0 && !SkatedLeft[client]) {
-           SkatedLeft[client] = true; 
-        }
-    }
-}
-
-// public Action:ISDM_UnblockDirections(Handle:timer, any:client) {
-//     BlockDirections[client] = false;
-// }
 
 public Action:ISDM_DoNothing(Handle:timer, any:client) {}
 
