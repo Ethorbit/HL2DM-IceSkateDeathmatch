@@ -1,9 +1,5 @@
 // Ice Skate Deathmatch is a thing now thanks to Himanshu's choice of commands :)
 
-// TODO:
-// Scale gravity by player's velocity as well so that they never get outside the bounds of the map
-// Make unusually slow at first, but gain speed over time at an unusal rate
-
 public Plugin:myinfo =
 {
 	name = "Ice Skate Deathmatch",
@@ -110,7 +106,11 @@ public void OnPluginStart() {
     ISDM_MaxPlayers = GetMaxClients();   
     SetConVarFloat(FindConVar("sv_friction"), 0.5, false, false); // No other way found so far to allow players to slide :(
     SetConVarFloat(FindConVar("sv_accelerate"), 100.0, false, false); // Very much optional, playable without it
-    SetConVarFloat(FindConVar("sv_airaccelerate"), 9999.0, false, false); // Based on feedback airaccelerate is more popular than custom movement
+    SetConVarFloat(FindConVar("sv_airaccelerate"), 9999.0, false, false); // Based on feedback airaccelerate is the more popular option over what was used
+    SetConVarFloat(FindConVar("phys_timescale"), 2.0, false, false); // A necessity because of how fast players can go now
+    SetConVarFloat(FindConVar("physcannon_minforce"), 20000.0, false, false); 
+    SetConVarFloat(FindConVar("physcannon_maxforce"), 20000.0, false, false); // Not too fast, but not too slow for new player speeds either
+    SetConVarFloat(FindConVar("physcannon_pullforce"), 10000.0, false, false); // Allow players to pull stuff 2.5x farther (not much of a difference)
     ISDM_PerkVars[SlowPerkSpeedConVar] = CreateConVar("ISDM_SlowPerkSpeed", "210.0", "The maximum speed players can go to get Slow Perk", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[FastPerk1SpeedConVar] = CreateConVar("ISDM_FastPerk1Speed", "600.0", "The maximum speed players can go to get Fast Perk #1", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[FastPerk2SpeedConVar] = CreateConVar("ISDM_FastPerk2Speed", "800.0", "The maximum speed players can go to get Fast Perk #2", FCVAR_SERVER_CAN_EXECUTE);
@@ -138,10 +138,6 @@ public void OnPluginStart() {
     for (new i = 0; i < sizeof(PerkIncrement); i++) { // Loop through each perk and assign it to an array
         ISDM_Perks[PerkIncrement[i]] = CreateArray(32);
     }
-
-    // for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
-
-    // }
 }
 
 public void ISDM_PerkChanged(Handle:convar, const String:oldValue[], const String:newValue[]) {
@@ -163,10 +159,13 @@ public void ISDM_DelFromArray(Handle:array, item) {
 }
 
 public OnEntityCreated(entity, const String:classname[]) {
-    if (IsValidEntity(entity)) {
-        if (strcmp(classname, "prop_combine_ball", true) == 0 || strcmp(classname, "grenade_ar2", true) == 0) { // Make projectiles always move faster than the player
-            CreateTimer(0.3, GetClosestPlyToProj, entity);
+    if (IsValidEntity(entity)) {  
+        if (StrContains(classname, "prop_physics") == 0) {
+
         }
+        // if (strcmp(classname, "prop_combine_ball", true) == 0 || strcmp(classname, "grenade_ar2", true) == 0) { // Make projectiles always move faster than the player
+        //     CreateTimer(0.3, GetClosestPlyToProj, entity);
+        // }
     }
 }
 
@@ -226,7 +225,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                             ISDM_AddPerk(client, ISDM_Perks[ISDM_AirPerk]);
                         }
 
-                        new Float:GravityEquation = (GetVectorDistance(plyPos, ThingBelowPly) / 60.0); // The higher you are the more brutal the gravity increases (Unless you start falling from high up already)               
+                        new Float:GravityEquation = (GetVectorDistance(plyPos, ThingBelowPly) / 50.0); // The higher you are the more brutal the gravity increases (Unless you start falling from high up already)               
                         if (GravityEquation > 1.0) { // Make sure low gravity never occurs
                             SetEntPropFloat(client, Prop_Data, "m_flGravity", GravityEquation);   
                         }     
@@ -346,8 +345,6 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
         }
     }
 
-    
-
     return Plugin_Continue;
 }
 
@@ -362,7 +359,7 @@ public Action:ISDM_IncrementSkate(Handle:timer, any:client) {
     if (GetClientButtons(client) & 1 << 9 && GetClientButtons(client) & 1 << 10 ) {
     } else {
         if (PlySkates[client] < 8) { // Give them an easy chance to skate fast
-            PlySkates[client] = PlySkates[client] + 3;
+            PlySkates[client] = PlySkates[client] + 2;
         } else if (PlySkates[client] < 20) {
             PlySkates[client]++; // They are pretty fast now, start adding normal speed boosts
         } else {
@@ -404,116 +401,116 @@ public void ISDM_UpdatePerks(client) {
     bool Speed3AndAir = (AllSpeedPerks && ISDM_GetPerk(client, ISDM_Perks[ISDM_AirPerk]));
     bool OnlyAirPerk = (ISDM_GetPerk(client, ISDM_Perks[ISDM_AirPerk]) && !Only1SpeedPerk && !Only2SpeedPerks && !AllSpeedPerks && !Speed1AndAir && !Speed2AndAir && !Speed3AndAir)
 
+    if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
+        ClientCommand(client, "r_screenoverlay 0");
+    }
+
+    // if (ISDM_GetPerk(client, ISDM_Perks[ISDM_SlowPerk])) {
+    //     ClientCommand(client, "r_screenoverlay IceSkateDM/slowperk");
+    // }
+
+    if (OnlyAirPerk) {
+        ClientCommand(client, "r_screenoverlay IceSkateDM/airperk");
+    }
+
+    if (Only1SpeedPerk && !Speed1AndAir) {
+        ClientCommand(client, "r_screenoverlay IceSkateDM/1speedperk");
+    }
+
+    if (Only2SpeedPerks && !Speed2AndAir) {
+        ClientCommand(client, "r_screenoverlay IceSkateDM/2speedperks");
+    }
+
+    if (AllSpeedPerks && !Speed3AndAir) {
+        ClientCommand(client, "r_screenoverlay IceSkateDM/allspeedperks");
+    }
+
+    if (Speed1AndAir) {
+        ClientCommand(client, "r_screenoverlay IceSkateDM/1speedperkandair");
+    }
+
+    if (Speed2AndAir) {
+        ClientCommand(client, "r_screenoverlay IceSkateDM/2speedperksandair");
+    }
+
+    if (Speed3AndAir) {
+        ClientCommand(client, "r_screenoverlay IceSkateDM/allspeedperksandair");
+    }
+    
+    if (SkatedRight[client] && GetClientButtons(client) & IN_MOVERIGHT) {          
         if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
-            ClientCommand(client, "r_screenoverlay 0");
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftarrow");
         }
 
-        if (ISDM_GetPerk(client, ISDM_Perks[ISDM_SlowPerk])) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/slowperk");
-        }
+        // if (ISDM_GetPerk(client, ISDM_Perks[ISDM_SlowPerk])) {
+        //     ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandslowperk");
+        // }
 
         if (OnlyAirPerk) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/airperk");
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandairperk");
         }
 
         if (Only1SpeedPerk && !Speed1AndAir) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/1speedperk");
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftand1speedperk");
         }
 
         if (Only2SpeedPerks && !Speed2AndAir) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/2speedperks");
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftand2speedperks");
         }
 
         if (AllSpeedPerks && !Speed3AndAir) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/allspeedperks");
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandallspeedperks");
         }
 
         if (Speed1AndAir) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/1speedperkandair");
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Left/left1speedperkandair");
         }
 
         if (Speed2AndAir) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/2speedperksandair");
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Left/left2speedperksandair");
         }
 
         if (Speed3AndAir) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/allspeedperksandair");
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftallspeedperksandair");
         }
-    
-        if (SkatedRight[client] && GetClientButtons(client) & IN_MOVERIGHT) {          
-            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftarrow");
-            }
-
-            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_SlowPerk])) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandslowperk");
-            }
-
-            if (OnlyAirPerk) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandairperk");
-            }
-
-            if (Only1SpeedPerk && !Speed1AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftand1speedperk");
-            }
-
-            if (Only2SpeedPerks && !Speed2AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftand2speedperks");
-            }
-
-            if (AllSpeedPerks && !Speed3AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandallspeedperks");
-            }
-
-            if (Speed1AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/left1speedperkandair");
-            }
-
-            if (Speed2AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/left2speedperksandair");
-            }
-
-            if (Speed3AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftallspeedperksandair");
-            }
-        }
+    }
         
-        if (SkatedLeft[client] && GetClientButtons(client) & IN_MOVELEFT) {
-            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightarrow");
-            }
+    if (SkatedLeft[client] && GetClientButtons(client) & IN_MOVELEFT) {
+        if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightarrow");
+        }
 
-            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_SlowPerk])) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandslowperk");
-            }
+        // if (ISDM_GetPerk(client, ISDM_Perks[ISDM_SlowPerk])) {
+        //     ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandslowperk");
+        // }
 
-            if (OnlyAirPerk) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandairperk");
-            }
+        if (OnlyAirPerk) {
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandairperk");
+        }
 
-            if (Only1SpeedPerk && !Speed1AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightand1speedperk");
-            }
+        if (Only1SpeedPerk && !Speed1AndAir) {
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightand1speedperk");
+        }
 
-            if (Only2SpeedPerks && !Speed2AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightand2speedperks");
-            }
+        if (Only2SpeedPerks && !Speed2AndAir) {
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightand2speedperks");
+        }
 
-            if (AllSpeedPerks && !Speed3AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandallspeedperks");
-            }
+        if (AllSpeedPerks && !Speed3AndAir) {
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandallspeedperks");
+        }
 
-            if (Speed1AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/right1speedperkandair");
-            }
+        if (Speed1AndAir) {
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Right/right1speedperkandair");
+        }
 
-            if (Speed2AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/right2speedperksandair");
-            }
+        if (Speed2AndAir) {
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Right/right2speedperksandair");
+        }
 
-            if (Speed3AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightallspeedperksandair");
-            }
+        if (Speed3AndAir) {
+            ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightallspeedperksandair");
+        }
     }
 }
 
