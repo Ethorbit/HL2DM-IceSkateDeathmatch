@@ -57,7 +57,6 @@ new Handle:AddPlySkate[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:AddTimeToPressedKey[MAXPLAYERS + 1] = INVALID_HANDLE;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
-
 new Float:PlySkates[MAXPLAYERS + 1] = 0.0;
 new Float:PlyInitialHeight[MAXPLAYERS + 1] = 0.0;
 bool SkatedLeft[MAXPLAYERS + 1] = false;
@@ -286,11 +285,13 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                     ElapsedLeftTime[client] = 0; 
                 }
 
-                if (ElapsedLeftTime[client] > 2 || ElapsedRightTime[client] > 2) {
-                    PlySkates[client]--;
+                if (ElapsedLeftTime[client] > 2 || ElapsedRightTime[client] > 2) { // They have let go of the skate keys for too long, make them lose speed
+                    if (PlySkates[client] > 0) {
+                        PlySkates[client]--;
+                    }
                 }
 
-                if (!IsValidHandle(ResolveDirectionsLeft[client]) || !IsValidHandle(ResolveDirectionsRight[client]) && !IsValidHandle(AddDirection[client]) && BlockDirections[client] == false) {
+                if (!IsValidHandle(ResolveDirectionsLeft[client]) || !IsValidHandle(ResolveDirectionsRight[client]) && !IsValidHandle(AddDirection[client])) {
                     if (!IsValidHandle(AddTimeToPressedKey[client])) {
                         AddTimeToPressedKey[client] = CreateTimer(1.0, ISDM_AddKeyTime, client);
                     }
@@ -380,32 +381,37 @@ public bool:TraceEntityFilterPlayer(entity, contentsMask)
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////// ISDM SKATE LOGIC //////////////////////////////////
 public Action:ISDM_IncrementSkate(Handle:timer, any:client) {   
-    if (!SkatedRight[client] && SkatedLeft[client]) {
-        if (!IsValidHandle(ResolveDirectionsLeft[client]) && !IsValidHandle(ResolveDirectionsRight[client])) {
-            new Handle:data = CreateDataPack();
-            WritePackCell(data, client);
-            WritePackString(data, "Right");
-            ResolveDirectionsRight[client] = CreateTimer(1.0, ISDM_ResolveDirections, data);
-        } 
+    if (GetClientButtons(client) & 1 << 9 && GetClientButtons(client) & 1 << 10 ) {
     } else {
-        ResolveDirectionsRight[client] = INVALID_HANDLE;
-    }
-
-    if (!SkatedLeft[client] && SkatedRight[client]) {
-        if (!IsValidHandle(ResolveDirectionsLeft[client]) && !IsValidHandle(ResolveDirectionsLeft[client])) {
-            new Handle:data = CreateDataPack();
-            WritePackCell(data, client);
-            WritePackString(data, "Left");
-            ResolveDirectionsLeft[client] = CreateTimer(1.0, ISDM_ResolveDirections, data);
+        if (!SkatedRight[client] && SkatedLeft[client]) {
+            if (!IsValidHandle(ResolveDirectionsLeft[client]) && !IsValidHandle(ResolveDirectionsRight[client])) {
+                new Handle:data = CreateDataPack();
+                WritePackCell(data, client);
+                WritePackString(data, "Right");
+                ResolveDirectionsRight[client] = CreateTimer(1.0, ISDM_ResolveDirections, data);
+            } 
+        } else {
+            ResolveDirectionsRight[client] = INVALID_HANDLE;
         }
-    } else {
-        ResolveDirectionsLeft[client] = INVALID_HANDLE;
-    }
 
-    if (PlySkates[client] < 20) { // Give them an easy chance to skate fast
-        PlySkates[client] = PlySkates[client] + 3;
-    } else {
-        PlySkates[client]++;
+        if (!SkatedLeft[client] && SkatedRight[client]) {
+            if (!IsValidHandle(ResolveDirectionsLeft[client]) && !IsValidHandle(ResolveDirectionsLeft[client])) {
+                new Handle:data = CreateDataPack();
+                WritePackCell(data, client);
+                WritePackString(data, "Left");
+                ResolveDirectionsLeft[client] = CreateTimer(1.0, ISDM_ResolveDirections, data);
+            }
+        } else {
+            ResolveDirectionsLeft[client] = INVALID_HANDLE;
+        }
+
+        if (PlySkates[client] < 8) { // Give them an easy chance to skate fast
+            PlySkates[client] = PlySkates[client] + 3;
+        } else if (PlySkates[client] < 20) {
+            PlySkates[client]++; // They are pretty fast now, start adding normal speed boosts
+        } else {
+            PlySkates[client] = PlySkates[client] + 0.5; // They are going super fast, add smaller speed boosts
+        }
     }
 }
 
@@ -420,9 +426,6 @@ public void ISDM_UpdatePerks(client) {
     bool Speed3AndAir = (AllSpeedPerks && ISDM_GetPerk(client, ISDM_Perks[ISDM_AirPerk]));
     bool OnlyAirPerk = (ISDM_GetPerk(client, ISDM_Perks[ISDM_AirPerk]) && !Only1SpeedPerk && !Only2SpeedPerks && !AllSpeedPerks && !Speed1AndAir && !Speed2AndAir && !Speed3AndAir)
 
-   // if (SkatedRight[client] == false && SkatedLeft[client] == false) { // If they have no left or right indicators      
-
-    if (ElapsedLeftTime[client] < 1 && ElapsedRightTime[client] < 1) {
         if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
             ClientCommand(client, "r_screenoverlay 0");
         }
@@ -458,10 +461,8 @@ public void ISDM_UpdatePerks(client) {
         if (Speed3AndAir) {
             ClientCommand(client, "r_screenoverlay IceSkateDM/allspeedperksandair");
         }
-    }
     
-    if (ElapsedLeftTime[client] > 0) {
-        if (SkatedRight[client] && !SkatedLeft[client]) { // For left indicator           
+        if (SkatedRight[client] && GetClientButtons(client) & IN_MOVERIGHT) {          
             if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
                 ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftarrow");
             }
@@ -498,10 +499,8 @@ public void ISDM_UpdatePerks(client) {
                 ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftallspeedperksandair");
             }
         }
-    }
-
-    if (ElapsedRightTime[client] > 0) {
-        if (SkatedLeft[client] && !SkatedRight[client]) { // For right indicator
+        
+        if (SkatedLeft[client] && GetClientButtons(client) & IN_MOVELEFT) {
             if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
                 ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightarrow");
             }
@@ -537,7 +536,6 @@ public void ISDM_UpdatePerks(client) {
             if (Speed3AndAir) {
                 ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightallspeedperksandair");
             }
-        }
     }
 }
 
@@ -551,26 +549,21 @@ public Action:ISDM_ResolveDirections(Handle:timer, Handle:data) {
         if (strcmp(Direction, "Left") == 0 && !SkatedRight[client]) {
             SkatedRight[client] = true;
 
-            if (!IsValidHandle(AllowDirections[client])) {
-                //BlockDirections[client] = true;
-                AllowDirections[client] = CreateTimer(0.1, ISDM_UnblockDirections, client);
-            }
+            // if (!IsValidHandle(AllowDirections[client])) {
+            //     //BlockDirections[client] = true;
+            //     AllowDirections[client] = CreateTimer(0.1, ISDM_UnblockDirections, client);
+            // }
         }
 
         if (strcmp(Direction, "Right") == 0 && !SkatedLeft[client]) {
            SkatedLeft[client] = true; 
-
-            if (!IsValidHandle(AllowDirections[client])) {
-               // BlockDirections[client] = true;
-                AllowDirections[client] = CreateTimer(0.1, ISDM_UnblockDirections, client);
-            }
         }
     }
 }
 
-public Action:ISDM_UnblockDirections(Handle:timer, any:client) {
-    BlockDirections[client] = false;
-}
+// public Action:ISDM_UnblockDirections(Handle:timer, any:client) {
+//     BlockDirections[client] = false;
+// }
 
 public Action:ISDM_DoNothing(Handle:timer, any:client) {}
 
