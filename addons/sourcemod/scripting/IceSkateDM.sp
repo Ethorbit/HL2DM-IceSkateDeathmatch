@@ -44,9 +44,7 @@ new String:ISDM_Sounds[][32] = { // Sounds used by the gamemode
     "impact02",
     "skate01",
     "skate02",
-    "skate03",
-    "skate04",
-    "skate05"
+    "skate03"
 }
 
 new ISDM_MaxPlayers;
@@ -55,6 +53,7 @@ new Handle:ResolveDirectionsLeft[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ResolveDirectionsRight[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:AddPlySkate[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:AddTimeToPressedKey[MAXPLAYERS + 1] = INVALID_HANDLE;
+new Handle:TimeForSkateSound[MAXPLAYERS + 1] = INVALID_HANDLE;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
 new Float:PlySkates[MAXPLAYERS + 1] = 0.0;
@@ -108,6 +107,7 @@ public OnGameFrame() { // Update player's perks every frame
 
 public void OnPluginStart() {
     ISDM_MaxPlayers = GetMaxClients();   
+    SetConVarInt(FindConVar("sv_footsteps"), 0, false, false); // Footstep sounds are replaced with skating sounds
     SetConVarFloat(FindConVar("sv_friction"), 0.5, false, false); // No other way found so far to allow players to slide :(
     SetConVarFloat(FindConVar("sv_accelerate"), 100.0, false, false); // Very much optional, playable without it
     SetConVarFloat(FindConVar("sv_airaccelerate"), 9999.0, false, false); // Based on feedback airaccelerate is the more popular option over what was used
@@ -358,12 +358,15 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                     }
                 }
 
-                if (buttons & IN_MOVELEFT && ValidSkateLeft || buttons & IN_MOVERIGHT && ValidSkateRight) {
-                    if (!IsValidHandle(AddPlySkate[client])) {
-                        AddPlySkate[client] = CreateTimer(0.1, ISDM_IncrementSkate, client);
-                    } 
-                } else {
-                    AddPlySkate[client] = INVALID_HANDLE;
+                if (!NotOnGround) {
+                    if (buttons & IN_MOVELEFT && ValidSkateLeft || buttons & IN_MOVERIGHT && ValidSkateRight) {
+                        ISDM_SkateSound(client)
+                        if (!IsValidHandle(AddPlySkate[client])) {
+                            AddPlySkate[client] = CreateTimer(0.1, ISDM_IncrementSkate, client);
+                        } 
+                    } else {
+                        AddPlySkate[client] = INVALID_HANDLE;
+                    }
                 }
 
                 if (buttons & IN_MOVELEFT || buttons & IN_MOVERIGHT) { // Player is skating                      
@@ -411,6 +414,15 @@ public ISDM_StopSounds() { // These are the sounds that are replaced/unwanted
     }
 }
 
+public ISDM_MuteSkateSounds(client) { // Stops emitting ice skate sounds on a client
+    new String:SkateSounds[][] = {"skate01", "skate02", "skate03"};
+    for (new i = 0; i < sizeof(SkateSounds); i++) {
+        new String:SoundFile[58];
+        Format(SoundFile, sizeof(SoundFile), "IceSkateDM/%s.wav", SkateSounds[i]);
+        StopSound(client, CHAN_AUTO, SoundFile);
+    }    
+}
+
 public ISDM_ImpactSound(client) { // Replaces the fall damage sound with the new ice one
     new String:RandomImpact[][] = {"impact01.wav", "impact02.wav"};
     new String:SoundName[40];
@@ -420,6 +432,17 @@ public ISDM_ImpactSound(client) { // Replaces the fall damage sound with the new
     EmitSoundToAll(SoundName, client, CHAN_AUTO, SNDLVL_NORM, _, 1.0, _, _, _, _, _, _); // Plays the ice impact sound
 }
 
+public ISDM_SkateSound(client) { // Plays a random ice skate sound for skating players
+    if (!IsValidHandle(TimeForSkateSound[client])) { // If a skate sound isn't already in progress
+        new String:RandomSound[][] = {"skate01", "skate02", "skate03"};
+        new String:SoundName[40];
+        int RandomIndex = GetRandomInt(0, 2);
+        Format(SoundName, sizeof(SoundName), "IceSkateDM/%s.wav", RandomSound[RandomIndex]);
+        TimeForSkateSound[client] = CreateTimer(GetSoundDuration(SoundName), ISDM_DoNothing);
+        PrecacheSound(SoundName);
+        EmitSoundToAll(SoundName, client, CHAN_AUTO, SNDLVL_NORM, _, 0.40, _, _, _, _, _, _); // Plays the ice skate sound
+    }
+}
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////// ISDM SKATE LOGIC //////////////////////////////////
 public Action:ISDM_IncrementSkate(Handle:timer, any:client) {
