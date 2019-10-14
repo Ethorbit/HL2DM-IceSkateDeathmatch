@@ -39,9 +39,19 @@ new String:ISDM_Materials[][63] = { // The materials the gamemode uses
     "Right/rightallspeedperksandair"
 }
 
+new String:ISDM_Sounds[][32] = { // Sounds used by the gamemode
+    "impact01",
+    "impact02",
+    "impact03",
+    "skate01",
+    "skate02",
+    "skate03",
+    "skate04",
+    "skate05"
+}
+
 new ISDM_MaxPlayers;
 new Handle:AddDirection[MAXPLAYERS + 1] = INVALID_HANDLE;
-new Handle:AllowDirections[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ResolveDirectionsLeft[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ResolveDirectionsRight[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:AddPlySkate[MAXPLAYERS + 1] = INVALID_HANDLE;
@@ -52,7 +62,6 @@ new Float:PlySkates[MAXPLAYERS + 1] = 0.0;
 new Float:PlyInitialHeight[MAXPLAYERS + 1] = 0.0;
 bool SkatedLeft[MAXPLAYERS + 1] = false;
 bool SkatedRight[MAXPLAYERS + 1] = false;
-bool BlockDirections[MAXPLAYERS + 1] = false;
 new Float:MAXSLOWSPEED;
 new Float:MAXAIRHEIGHT;
 new Float:SPEED1SPEED;
@@ -84,7 +93,7 @@ new ISDM_PerkVars[PerkConVars];
 public OnGameFrame() { // Update player's perks every frame
     for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
         if (IsValidEntity(i)) {
-            if (IsPlayerInGame(i)) {  
+            if (IsClientInGame(i)) {  
                 if (!IsPlayerAlive(i)) {
                     ClientCommand(i, "r_screenoverlay 0"); // Reset perks since they died
                 }
@@ -122,6 +131,14 @@ public void OnPluginStart() {
         AddFileToDownloadsTable(VTFs);
         AddFileToDownloadsTable(VMTs);
         PrecacheDecal(VTFs);
+    }
+
+    for (new i = 0; i < sizeof(ISDM_Sounds); i++) { // Loop through sounds and force downloads too
+        int MaxMatLength = 32;
+        new String:Sounds[MaxMatLength];
+        Format(Sounds, MaxMatLength, "sound/IceSkateDM/%s.wav");
+        AddFileToDownloadsTable(Sounds);
+        PrecacheSound(Sounds);
     }
 
     new const perkvar[5] = {SlowPerkSpeedConVar, FastPerk1SpeedConVar, FastPerk2SpeedConVar, FastPerk3SpeedConVar, AirPerkHeightConVar}; 
