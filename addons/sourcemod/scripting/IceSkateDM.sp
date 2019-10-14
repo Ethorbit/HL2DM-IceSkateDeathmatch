@@ -42,7 +42,6 @@ new String:ISDM_Materials[][63] = { // The materials the gamemode uses
 new String:ISDM_Sounds[][32] = { // Sounds used by the gamemode
     "impact01",
     "impact02",
-    "impact03",
     "skate01",
     "skate02",
     "skate03",
@@ -91,6 +90,7 @@ new ISDM_Perks[Perks];
 new ISDM_PerkVars[PerkConVars];
 
 public OnGameFrame() { // Update player's perks every frame
+    ISDM_StopSounds()
     for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
         if (IsValidEntity(i)) {
             if (IsClientInGame(i)) {  
@@ -401,19 +401,23 @@ public bool:TraceEntityFilterPlayer(entity, contentsMask)
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////// ISDM SOUND LOGIC //////////////////////////////////
+int CHAN_AUTO = 0;
+int SNDLVL_NORM = 75;
 
-public ISDM_ImpactSound(client) {
-    int CHAN_AUTO = 0;
-    int SNDLVL_NORM = 75;
+public ISDM_StopSounds() { // These are the sounds that are replaced/unwanted
+    for (new i = 1; i <= ISDM_MaxPlayers; i++) {
+        StopSound(i, CHAN_AUTO, "player/pl_fallpain1.wav");
+        StopSound(i, CHAN_AUTO, "player/pl_fallpain3.wav");
+    }
+}
 
-    StopSound(client, CHAN_AUTO, "player/pl_fallpain1.wav");
-    StopSound(client, CHAN_AUTO, "player/pl_fallpain3.wav");
-    new String:RandomImpact[][] = {"impact01.wav", "impact02.wav", "impact03.wav"};
+public ISDM_ImpactSound(client) { // Replaces the fall damage sound with the new ice one
+    new String:RandomImpact[][] = {"impact01.wav", "impact02.wav"};
     new String:SoundName[40];
-    int RandomIndex = GetRandomInt(0, 2);
-    Format(SoundName, sizeof(SoundName), "IceSkateDM/%s", RandomImpact[RandomIndex]);
+    int RandomIndex = GetRandomInt(0, 1); 
+    Format(SoundName, sizeof(SoundName), "IceSkateDM/%s", RandomImpact[RandomIndex]); // Randomly chooses between impact01 and impact02
     PrecacheSound(SoundName);
-    EmitSoundToAll(SoundName, client, CHAN_AUTO, SNDLVL_NORM, _, 0.75, _, _, _, _, _, _);
+    EmitSoundToAll(SoundName, client, CHAN_AUTO, SNDLVL_NORM, _, 1.0, _, _, _, _, _, _); // Plays the ice impact sound
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
