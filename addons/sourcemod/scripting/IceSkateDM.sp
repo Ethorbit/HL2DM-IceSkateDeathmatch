@@ -136,7 +136,8 @@ public void OnPluginStart() {
     for (new i = 0; i < sizeof(ISDM_Sounds); i++) { // Loop through sounds and force downloads too
         int MaxMatLength = 32;
         new String:Sounds[MaxMatLength];
-        Format(Sounds, MaxMatLength, "sound/IceSkateDM/%s.wav");
+        new String:SoundPrecache[MaxMatLength];
+        Format(Sounds, MaxMatLength, "sound/IceSkateDM/%s.wav", ISDM_Sounds[i]);
         AddFileToDownloadsTable(Sounds);
         PrecacheSound(Sounds);
     }
@@ -176,40 +177,41 @@ public OnEntityCreated(entity, const String:classname[]) {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// ISDM DAMAGE LOGIC /////////////////////////////////
 public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &damagetype) {
-    new String:attackerweapon[32];
-    GetClientWeapon(attacker, attackerweapon, 32);
-    
-    PrintToChat(victim, "Unmodified damage: %f", damage);
-
     if (damagetype & DMG_FALL) { // Disable disgusting fall damage
         damage = 0.0;
+        ISDM_ImpactSound(victim); // Function to replace the fall damage sound
         return Plugin_Changed;
     }
 
-    if (damagetype & DMG_BULLET && ISDM_GetPerk(attacker, ISDM_Perks[ISDM_AirPerk])) { // Air perk increases damage
-        if (strcmp(attackerweapon, "weapon_357") == 0 || strcmp(attackerweapon, "weapon_crossbow") == 0) { // Only multiply the good weapons' damage a tiny bit
-            damage = damage * 1.2;
-            return Plugin_Changed; 
-        } else if (strcmp(attackerweapon, "weapon_shotgun") == 0) { // Shotgun is decent but only up close, so multiply it a little more
-            damage = damage * 1.4;
+    if (GetClientOfUserId(attacker) != 0) { // If there is an attacker
+        new String:attackerweapon[32];
+        GetClientWeapon(attacker, attackerweapon, 32);
+
+        if (damagetype & DMG_BULLET && ISDM_GetPerk(attacker, ISDM_Perks[ISDM_AirPerk])) { // Air perk increases damage
+            if (strcmp(attackerweapon, "weapon_357") == 0 || strcmp(attackerweapon, "weapon_crossbow") == 0) { // Only multiply the good weapons' damage a tiny bit
+                damage = damage * 1.2;
+                return Plugin_Changed; 
+            } else if (strcmp(attackerweapon, "weapon_shotgun") == 0) { // Shotgun is decent but only up close, so multiply it a little more
+                damage = damage * 1.4;
+                return Plugin_Changed;
+            } else if (strcmp(attackerweapon, "weapon_rpg") != 0) { // Every other weapon not including rpg are pretty bad at dmg, so multiply by 2X
+                damage = damage * 2.0;
+                return Plugin_Changed;
+            }
+        }
+
+        // The 3rd speed perk makes you immune to certain damage:
+        if (damagetype & DMG_BLAST && strcmp(attackerweapon, "weapon_rpg") != 0 && ISDM_GetPerk(victim, ISDM_Perks[ISDM_SpeedPerk3])) {
+            damage = 0.0;
             return Plugin_Changed;
-        } else if (strcmp(attackerweapon, "weapon_rpg") != 0) { // Every other weapon not including rpg are pretty bad at dmg, so multiply by 2X
-            damage = damage * 2.0;
+        }
+
+        if (damagetype & DMG_CRUSH || damagetype & DMG_DISSOLVE && ISDM_GetPerk(victim, ISDM_Perks[ISDM_SpeedPerk3])) { 
+            damage = 0.0;
             return Plugin_Changed;
         }
     }
-
-    // The 3rd speed perk makes you immune to certain damage:
-    if (damagetype & DMG_BLAST && strcmp(attackerweapon, "weapon_rpg") != 0 && ISDM_GetPerk(victim, ISDM_Perks[ISDM_SpeedPerk3])) {
-        damage = 0.0;
-        return Plugin_Changed;
-    }
-
-    if (damagetype & DMG_CRUSH || damagetype & DMG_DISSOLVE && ISDM_GetPerk(victim, ISDM_Perks[ISDM_SpeedPerk3])) { 
-        damage = 0.0;
-        return Plugin_Changed;
-    }
-    
+        
     return Plugin_Continue;
 }
 
@@ -396,6 +398,23 @@ public bool:TraceEntityFilterPlayer(entity, contentsMask)
 {
     return entity <= 0 || entity > MaxClients;
 } 
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////// ISDM SOUND LOGIC //////////////////////////////////
+
+public ISDM_ImpactSound(client) {
+    int CHAN_AUTO = 0;
+    int SNDLVL_NORM = 75;
+
+    StopSound(client, CHAN_AUTO, "player/pl_fallpain1.wav");
+    StopSound(client, CHAN_AUTO, "player/pl_fallpain3.wav");
+    new String:RandomImpact[][] = {"impact01.wav", "impact02.wav", "impact03.wav"};
+    new String:SoundName[40];
+    int RandomIndex = GetRandomInt(0, 2);
+    Format(SoundName, sizeof(SoundName), "IceSkateDM/%s", RandomImpact[RandomIndex]);
+    PrecacheSound(SoundName);
+    EmitSoundToAll(SoundName, client, CHAN_AUTO, SNDLVL_NORM, _, 0.75, _, _, _, _, _, _);
+}
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////// ISDM SKATE LOGIC //////////////////////////////////
