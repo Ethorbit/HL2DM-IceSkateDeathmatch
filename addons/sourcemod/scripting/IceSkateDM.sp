@@ -48,6 +48,7 @@ new String:ISDM_Sounds[][32] = { // Sounds used by the gamemode
 }
 
 new ISDM_MaxPlayers;
+new ISDM_IsHooked[MAXPLAYERS + 1] = false;
 new Handle:AddDirection[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ResolveDirectionsLeft[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ResolveDirectionsRight[MAXPLAYERS + 1] = INVALID_HANDLE;
@@ -93,6 +94,11 @@ public OnGameFrame() { // Update player's perks every frame
     for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
         if (IsValidEntity(i)) {
             if (IsClientInGame(i)) {  
+                if (ISDM_IsHooked[i] == false) { // Ensure that the player is ALWAYS hooked for damage even if plugin is reloaded
+                    SDKHook(i, SDKHook_OnTakeDamage, ISDM_PlyTookDmg);
+                    ISDM_IsHooked[i] = true;
+                }
+
                 if (!IsPlayerAlive(i)) {
                     ClientCommand(i, "r_screenoverlay 0"); // Reset perks since they died
                 }
@@ -161,10 +167,6 @@ public void ISDM_DelFromArray(Handle:array, item) {
 
 public OnEntityCreated(entity, const String:classname[]) {
     if (IsValidEntity(entity)) {  
-        if (strcmp(classname, "player") == 0) { // Attach a damage hook to all players
-            SDKHook(entity, SDKHook_OnTakeDamage, ISDM_PlyTookDmg);
-        }
-
         if (StrContains(classname, "prop_physics") == 0) {
 
         }
@@ -414,12 +416,14 @@ public ISDM_StopSounds() { // These are the sounds that are replaced/unwanted
     }
 }
 
-public ISDM_MuteSkateSounds(client) { // Stops emitting ice skate sounds on a client
+public ISDM_MuteSkateSounds(client) { // Stops emitting ice skate sounds from a client
     new String:SkateSounds[][] = {"skate01", "skate02", "skate03"};
     for (new i = 0; i < sizeof(SkateSounds); i++) {
         new String:SoundFile[58];
         Format(SoundFile, sizeof(SoundFile), "IceSkateDM/%s.wav", SkateSounds[i]);
-        StopSound(client, CHAN_AUTO, SoundFile);
+        if (IsSoundPrecached(SoundFile)) {
+            StopSound(client, CHAN_AUTO, SoundFile);
+        }
     }    
 }
 
@@ -438,7 +442,7 @@ public ISDM_SkateSound(client) { // Plays a random ice skate sound for skating p
         new String:SoundName[40];
         int RandomIndex = GetRandomInt(0, 2);
         Format(SoundName, sizeof(SoundName), "IceSkateDM/%s.wav", RandomSound[RandomIndex]);
-        TimeForSkateSound[client] = CreateTimer(GetSoundDuration(SoundName), ISDM_DoNothing);
+        TimeForSkateSound[client] = CreateTimer(0.50, ISDM_DoNothing);
         PrecacheSound(SoundName);
         EmitSoundToAll(SoundName, client, CHAN_AUTO, SNDLVL_NORM, _, 0.40, _, _, _, _, _, _); // Plays the ice skate sound
     }
