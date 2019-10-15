@@ -61,11 +61,29 @@ new Float:PlySkates[MAXPLAYERS + 1] = 0.0;
 new Float:PlyInitialHeight[MAXPLAYERS + 1] = 0.0;
 bool SkatedLeft[MAXPLAYERS + 1] = false;
 bool SkatedRight[MAXPLAYERS + 1] = false;
+bool DeniedSprintSoundPlayed[MAXPLAYERS + 1] = false;
 new Float:MAXSLOWSPEED;
 new Float:MAXAIRHEIGHT;
 new Float:SPEED1SPEED;
 new Float:SPEED2SPEED;
 new Float:SPEED3SPEED;
+
+public OnClientDisconnect_Post(client) { // When a player leaves it is important to reset the client index's statistics
+    ISDM_IsHooked[client] = false;
+    AddDirection[client] = INVALID_HANDLE;
+    ResolveDirectionsLeft[client] = INVALID_HANDLE;
+    ResolveDirectionsRight[client] = INVALID_HANDLE;
+    AddPlySkate[client] = INVALID_HANDLE;
+    AddTimeToPressedKey[client] = INVALID_HANDLE;
+    TimeForSkateSound[client] = INVALID_HANDLE;
+    ElapsedLeftTime[client] = 0;   
+    ElapsedRightTime[client] = 0; 
+    PlySkates[client] = 0.0;
+    PlyInitialHeight[client] = 0.0;
+    SkatedLeft[client] = false;
+    SkatedRight[client] = false;
+    DeniedSprintSoundPlayed[client] = false;
+}
 
 enum Perks 
 {
@@ -89,30 +107,8 @@ enum PerkConVars
 new ISDM_Perks[Perks];
 new ISDM_PerkVars[PerkConVars];
 
-public OnGameFrame() { // Update player's perks every frame
-    ISDM_StopSounds()
-    for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
-        if (IsValidEntity(i)) {
-            if (IsClientInGame(i)) {  
-                if (ISDM_IsHooked[i] == false) { // Ensure that the player is ALWAYS hooked for damage even if plugin is reloaded
-                    SDKHook(i, SDKHook_OnTakeDamage, ISDM_PlyTookDmg);
-                    ISDM_IsHooked[i] = true;
-                }
-
-                if (!IsPlayerAlive(i)) {
-                    ClientCommand(i, "r_screenoverlay 0"); // Reset perks since they died
-                }
-            
-                if (IsPlayerAlive(i)) {
-                    ISDM_UpdatePerks(i);
-                }
-            }
-        }
-    }
-}
-
 public void OnPluginStart() {
-    ISDM_MaxPlayers = GetMaxClients();   
+    ISDM_MaxPlayers = GetMaxClients(); 
     SetConVarInt(FindConVar("sv_footsteps"), 0, false, false); // Footstep sounds are replaced with skating sounds
     SetConVarFloat(FindConVar("sv_friction"), 0.5, false, false); // No other way found so far to allow players to slide :(
     SetConVarFloat(FindConVar("sv_accelerate"), 100.0, false, false); // Very much optional, playable without it
@@ -162,6 +158,28 @@ public void OnPluginStart() {
 public void ISDM_DelFromArray(Handle:array, item) {
     if (FindValueInArray(array, item) > -1) {
         RemoveFromArray(array, FindValueInArray(array, item));
+    }
+}
+
+public OnGameFrame() {
+    ISDM_StopSounds()
+    for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
+        if (IsValidEntity(i)) {
+            if (IsClientInGame(i)) {  
+                if (ISDM_IsHooked[i] == false) { // Ensure that the player is ALWAYS hooked for damage even if plugin is reloaded
+                    SDKHook(i, SDKHook_OnTakeDamage, ISDM_PlyTookDmg);
+                    ISDM_IsHooked[i] = true;
+                }
+
+                if (!IsPlayerAlive(i)) {
+                    ClientCommand(i, "r_screenoverlay 0"); // Reset perks since they died
+                }
+            
+                if (IsPlayerAlive(i)) {
+                    ISDM_UpdatePerks(i);
+                }
+            }
+        }
     }
 }
 
@@ -216,7 +234,7 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
         
     return Plugin_Continue;
 }
-
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], float angles[3]) {
     new Float:currentPos[3];
     GetClientAbsOrigin(client, currentPos);
@@ -231,6 +249,8 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             float x = currentSpeed[0];
             float y = currentSpeed[1];
             float z = currentSpeed[2];
+            bool CanSprintX = (x >= 0 && x > 435.0 || x <= 0 && x < -435.0);
+            bool CanSprintY = (y >= 0 && y > 435.0 || y <= 0 && y < -435.0);
             bool IsSlowX = (x >= 0 && x < MAXSLOWSPEED || x <= 0 && x > -MAXSLOWSPEED);
             bool IsSlowY = (y >= 0 && y < MAXSLOWSPEED || y <= 0 && y > -MAXSLOWSPEED);
             bool IsFast1X = (x >= SPEED1SPEED && x < SPEED2SPEED || x <= -SPEED1SPEED && x > -SPEED2SPEED);
@@ -286,7 +306,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             }          
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// SLOW PERK //////////////////////////////////////
-            if (IsSlowX && IsSlowY && !IsHigh) { // Apply slow perk
+            if (!IsHigh) { // Apply slow perk
                 ISDM_AddPerk(client, ISDM_Perks[ISDM_SlowPerk]);
             } else {
                 ISDM_DelFromArray(ISDM_Perks[ISDM_SlowPerk], client);
@@ -313,7 +333,26 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 ISDM_DelFromArray(ISDM_Perks[ISDM_SpeedPerk3], client);
             }
     /////////////////////////////////////////////////////////////////////////////
-    /////////////////////////// BASIC ISDM PLAYER LOGIC /////////////////////////       
+    /////////////////////////// BASIC ISDM PLAYER LOGIC /////////////////////////  
+            if (buttons & IN_SPEED) {   
+            } else {
+                DeniedSprintSoundPlayed[client] = false;
+            }
+            
+            if (PlySkates[client] > 0.0 && CanSprintX && CanSprintY && buttons & IN_SPEED) { // Stop player from sprinting if they are skating
+                SetEntPropFloat(client, Prop_Data, "m_flMaxspeed", 190.0); // Basically if you sprint you seem like you're still walking
+                StopSound(client, 2, "player/suit_sprint.wav");
+
+                if (DeniedSprintSoundPlayed[client] == false) {
+                    EmitSoundToClient(client, "player/suit_denydevice.wav", _, 2, _, _, 1.0, _, _, _, _, _);
+                    DeniedSprintSoundPlayed[client] = true;
+                }
+            } 
+            
+            if (GetEntPropFloat(client, Prop_Data, "m_flMaxspeed") == 190.0) { 
+                SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
+            }
+
             if (buttons & IN_JUMP) { 
                 buttons &= ~IN_JUMP;
                 return Plugin_Continue; 
