@@ -5,7 +5,7 @@ public Plugin:myinfo =
 	name = "Ice Skate Deathmatch",
 	author = "Ethorbit",
 	description = "Greatly changes the way deathmatch is played introducing new techniques & perks",
-	version = "1.0",
+	version = "1.1.8",
 	url = ""
 }
 
@@ -55,6 +55,7 @@ new Handle:ResolveDirectionsRight[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:AddPlySkate[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:AddTimeToPressedKey[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:TimeForSkateSound[MAXPLAYERS + 1] = INVALID_HANDLE;
+new Handle:NearbyEntSearch[MAXPLAYERS + 1] = INVALID_HANDLE;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
 new Float:PlySkates[MAXPLAYERS + 1] = 0.0;
@@ -166,7 +167,7 @@ public OnGameFrame() {
     for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
         if (IsValidEntity(i)) {
             if (IsClientInGame(i)) {  
-                if (ISDM_IsHooked[i] == false) { // Ensure that the player is ALWAYS hooked for damage even if plugin is reloaded
+                if (ISDM_IsHooked[i] == false) { // Ensure that the player is ALWAYS hooked even if plugin is reloaded
                     SDKHook(i, SDKHook_OnTakeDamage, ISDM_PlyTookDmg);
                     ISDM_IsHooked[i] = true;
                 }
@@ -185,8 +186,8 @@ public OnGameFrame() {
 
 public OnEntityCreated(entity, const String:classname[]) {
     if (IsValidEntity(entity)) {  
-        if (StrContains(classname, "prop_physics") == 0) {
-
+        if (StrContains(classname, "prop_") == 0) {
+            //SDKHook(entity, SDKHook_ShouldCollide, ISDM_EntCollided);
         }
         // if (strcmp(classname, "prop_combine_ball", true) == 0 || strcmp(classname, "grenade_ar2", true) == 0) { // Make projectiles always move faster than the player
         //     CreateTimer(0.3, GetClosestPlyToProj, entity);
@@ -234,6 +235,53 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
         
     return Plugin_Continue;
 }
+
+public bool:TraceEntityFilterPlayer(entity, contentsMask)
+{
+    return entity <= 0 || entity > MaxClients;
+} 
+
+public bool TeleportTraceFilter(int entity, int contents, int client) {
+	return entity > 0 && client != entity;
+}
+
+public Action:ISDM_ResetCollision(Handle:timer, any:entity) {
+    if (IsValidEntity(entity)) {
+       SetEntProp(entity, Prop_Data, "m_CollisionGroup", 5);
+       SetEntProp(entity, Prop_Send, "m_CollisionGroup", 5); 
+    }
+}
+
+public Action:ISDM_NocollideProp(Handle:timer, any:entity) {
+    new String:EntClass[32];
+    GetEntityClassname(entity, EntClass, 32);
+    if (StrContains(EntClass, "prop_physics") == 0) {
+        SetEntProp(entity, Prop_Data, "m_CollisionGroup", 1);
+        SetEntProp(entity, Prop_Send, "m_CollisionGroup", 1); 
+        CreateTimer(2.0, ISDM_ResetCollision, entity); // Enable collisions for it again
+    }
+}
+
+public Action:ISDM_NocollideNearbyEnts(Handle:timer, any:client) { // I tried really hard not to have to do it this way, but traces suck and collision hook is too slow
+    new Float:clientOrigin[3];
+    GetClientAbsOrigin(client, clientOrigin);
+
+    for (new i = 0; i < 2048; i++) {
+        if (IsValidEntity(i) && IsValidEntity(client) && IsPlayerAlive(client) && IsClientConnected(client)) {
+            new String:EntClass[32];
+            GetEntityClassname(i, EntClass, 32);    
+            if (StrContains(EntClass, "prop_physics") == 0) {
+                new Float:propOrigin[3];
+                GetEntPropVector(i, Prop_Data, "m_vecOrigin", propOrigin);
+                if (GetVectorDistance(propOrigin, clientOrigin) < 500.0) {
+                    SetEntProp(i, Prop_Data, "m_CollisionGroup", 1);
+                    SetEntProp(i, Prop_Send, "m_CollisionGroup", 1);   
+                    CreateTimer(0.5, ISDM_ResetCollision, i);     
+                } 
+            }
+        }  
+    }
+}
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], float angles[3]) {
     new Float:currentPos[3];
@@ -263,7 +311,9 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             bool NotSlow = (!IsSlowX && !IsSlowY);
             bool NotFast = (!IsFast1X && !IsFast1Y && !IsFast2X && !IsFast2Y && !IsFast3X && !IsFast3Y)
             bool NotOnGround = (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1);
-    
+            bool SpeedPerk1Enabled = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk1]) || ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3]));
+            bool SpeedPerk2Enabled = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3]));
+
             if (NotSlow && NotFast && !IsHigh) { // Display no perks if the user has no perks active
                 ISDM_AddPerk(client, ISDM_Perks[ISDM_NoPerks]);
             } else {
@@ -272,6 +322,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
 
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// ISDM AIR LOGIC (& perk) ///////////////////////////////////////
+
             if (NotOnGround) { // Apply air perk
                 new Float:plyPos[3];
                 new Float:ThingBelowPly[3];   
@@ -296,9 +347,13 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                         new Float:GravityEquation = (GetVectorDistance(plyPos, ThingBelowPly) / 50.0); // The higher you are the more brutal the gravity increases (Unless you start falling from high up already)               
                         if (GravityEquation > 1.0) { // Make sure low gravity never occurs
                             SetEntPropFloat(client, Prop_Data, "m_flGravity", GravityEquation);   
-                        }     
-                    }
+                        }   
+                    }  
+                    CloseHandle(TraceZ);  
+                } else {
+                    CloseHandle(TraceZ);  
                 }
+
             } else { // If player is on the ground
                 ISDM_DelFromArray(ISDM_Perks[ISDM_AirPerk], client);
                 SetEntPropFloat(client, Prop_Data, "m_flGravity", 1.0);
@@ -333,7 +388,29 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 ISDM_DelFromArray(ISDM_Perks[ISDM_SpeedPerk3], client);
             }
     /////////////////////////////////////////////////////////////////////////////
-    /////////////////////////// BASIC ISDM PLAYER LOGIC /////////////////////////  
+    /////////////////////////// BASIC ISDM PLAYER LOGIC ///////////////////////// 
+
+            // Due to prop collisions changing at runtime we need to auto nocollide a prop a player is stuck in:     
+            new Float:mins[3];
+            new Float:maxs[3];
+            GetClientMins(client, mins);
+            GetClientMaxs(client, maxs);
+
+            new Handle:GetBlockingProps = TR_TraceHullFilterEx(currentPos, currentPos, mins, maxs, MASK_PLAYERSOLID, TraceEntityFilterPlayer);
+            int prop = 0;
+            if (TR_DidHit(GetBlockingProps) && TR_GetEntityIndex(GetBlockingProps)) {
+                prop = TR_GetEntityIndex(GetBlockingProps);
+                CreateTimer(0.5, ISDM_NocollideProp, TR_GetEntityIndex(GetBlockingProps));
+            }
+
+            CloseHandle(GetBlockingProps);
+        
+            if (SpeedPerk1Enabled) {
+                if (!IsValidHandle(NearbyEntSearch[client])) {
+                    NearbyEntSearch[client] = CreateTimer(0.1, ISDM_NocollideNearbyEnts, client);
+                }
+            }
+
             if (buttons & IN_SPEED) {   
             } else {
                 DeniedSprintSoundPlayed[client] = false;
@@ -350,7 +427,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             } 
             
             if (GetEntPropFloat(client, Prop_Data, "m_flMaxspeed") == 190.0) { 
-                SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
+                //SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
             }
 
             if (buttons & IN_JUMP) { 
@@ -360,7 +437,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
 
             bool ValidSkateLeft = SkatedRight[client] && !SkatedLeft[client];
             bool ValidSkateRight = SkatedLeft[client] && !SkatedRight[client];
-           // PrintToChat(client, "Current skates achieved: %f", TheirSkates);
+
             if (buttons & 1 << 9 && buttons & 1 << 10 ) { // They are not skating they are just moving left and right at the same time...
             } else {
                 if (buttons & IN_MOVELEFT) {
@@ -438,10 +515,6 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
     return Plugin_Continue;
 }
 
-public bool:TraceEntityFilterPlayer(entity, contentsMask)
-{
-    return entity <= 0 || entity > MaxClients;
-} 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////// ISDM SOUND LOGIC //////////////////////////////////
