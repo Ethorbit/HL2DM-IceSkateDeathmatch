@@ -189,6 +189,7 @@ public OnEntityCreated(entity, const String:classname[]) {
         if (StrContains(classname, "prop_") == 0) {
             //SDKHook(entity, SDKHook_ShouldCollide, ISDM_EntCollided);
         }
+
         // if (strcmp(classname, "prop_combine_ball", true) == 0 || strcmp(classname, "grenade_ar2", true) == 0) { // Make projectiles always move faster than the player
         //     CreateTimer(0.3, GetClosestPlyToProj, entity);
         // }
@@ -236,33 +237,51 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
     return Plugin_Continue;
 }
 
-public bool:TraceEntityFilterPlayer(entity, contentsMask)
-{
-    return entity <= 0 || entity > MaxClients;
-} 
-
-public bool TeleportTraceFilter(int entity, int contents, int client) {
-	return entity > 0 && client != entity;
-}
-
-public Action:ISDM_ResetCollision(Handle:timer, any:entity) {
-    if (IsValidEntity(entity)) {
-       SetEntProp(entity, Prop_Data, "m_CollisionGroup", 5);
-       SetEntProp(entity, Prop_Send, "m_CollisionGroup", 5); 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////// ISDM COLLISION LOGIC /////////////////////////////////////////////
+public Action:ISDM_ResetCollision(Handle:timer, Handle:data) {
+    ResetPack(data);
+    if (IsPackReadable(data, 1)) {
+        int entity = ReadPackCell(data);
+        int Motion = ReadPackCell(data);
+        if (IsValidEntity(entity)) {
+            SetEntProp(entity, Prop_Data, "m_CollisionGroup", 4);
+            SetEntProp(entity, Prop_Send, "m_CollisionGroup", 4); 
+            if (Motion != -1) { // Make sure the prop is supposed to have motion
+                SetEntityMoveType(entity, MOVETYPE_VPHYSICS);
+            }        
+        }
     }
 }
 
-public Action:ISDM_NocollideProp(Handle:timer, any:entity) {
-    new String:EntClass[32];
-    GetEntityClassname(entity, EntClass, 32);
-    if (StrContains(EntClass, "prop_physics") == 0) {
-        SetEntProp(entity, Prop_Data, "m_CollisionGroup", 1);
-        SetEntProp(entity, Prop_Send, "m_CollisionGroup", 1); 
-        CreateTimer(2.0, ISDM_ResetCollision, entity); // Enable collisions for it again
-    }
-}
+// public Action:ISDM_NocollideProp(Handle:timer, any:entity) {
+//     if (IsValidEntity(entity)) {
+//         new String:EntClass[32];
+//         GetEntityClassname(entity, EntClass, 32);
+//         if (StrContains(EntClass, "prop_physics") == 0) {
+//             int Motion2;
+//             int Motion = GetEntityMoveType(entity);
+//             if (Motion != MOVETYPE_NONE) { 
+//                 SetEntityMoveType(entity, MOVETYPE_NONE);
+//                 Motion2 = 1;
+//             } else {
+//                 Motion2 = -1;
+//             }
+
+//             SetEntProp(entity, Prop_Data, "m_CollisionGroup", 1);
+//             SetEntProp(entity, Prop_Send, "m_CollisionGroup", 1); 
+
+//             new Handle:data = CreateDataPack();
+//             WritePackCell(data, entity);
+//             WritePackCell(data, Motion2);
+//             CreateTimer(2.0, ISDM_ResetCollision, data); // Enable collisions for it again
+//         }
+//     }
+// }
 
 public Action:ISDM_NocollideNearbyEnts(Handle:timer, any:client) { // I tried really hard not to have to do it this way, but traces suck and collision hook is too slow
+    // m_nPhysgunState m_hLastAttacker m_hPhysicsAttacker
+    
     new Float:clientOrigin[3];
     GetClientAbsOrigin(client, clientOrigin);
 
@@ -271,15 +290,38 @@ public Action:ISDM_NocollideNearbyEnts(Handle:timer, any:client) { // I tried re
             new String:EntClass[32];
             GetEntityClassname(i, EntClass, 32);    
             if (StrContains(EntClass, "prop_physics") == 0) {
-                new Float:propOrigin[3];
-                GetEntPropVector(i, Prop_Data, "m_vecOrigin", propOrigin);
-                if (GetVectorDistance(propOrigin, clientOrigin) < 500.0) {
-                    SetEntProp(i, Prop_Data, "m_CollisionGroup", 1);
-                    SetEntProp(i, Prop_Send, "m_CollisionGroup", 1);   
-                    CreateTimer(0.5, ISDM_ResetCollision, i);     
-                } 
-            }
-        }  
+                if (GetEntProp(i, Prop_Send, "m_bAwake") == 0) { // Make sure the prop is sleeping
+                    new Float:propOrigin[3]; 
+                    new Float:propSpeed[3]; 
+                    
+                    GetEntPropVector(i, Prop_Data, "m_vecVelocity", propSpeed);
+                    if (propSpeed[0] == 0.0 && propSpeed[1] == 0.0 && propSpeed[2] == 0.0) { // If the prop isn't moving at all
+                        GetEntPropVector(i, Prop_Data, "m_vecOrigin", propOrigin);
+                        if (GetVectorDistance(propOrigin, clientOrigin) < 500.0) { // If the prop is too close to the player
+                            int Motion2; 
+                            int Motion = GetEntityMoveType(i);
+                            if (Motion == MOVETYPE_NONE) { // The prop_physics is marked to have motions disabled in the map editor
+                                Motion2 = -1;
+                            } else {
+                                Motion2 = 1;
+                            }
+
+                            if (Motion2 == 1) {
+                                SetEntityMoveType(i, MOVETYPE_NONE); // If the collision group is 1 and motion is enabled it can actually cause the server to crash or props to fall out of the map!
+                            }    
+                            
+                            SetEntProp(i, Prop_Data, "m_CollisionGroup", 1);
+                            SetEntProp(i, Prop_Send, "m_CollisionGroup", 1);
+
+                            new Handle:data = CreateDataPack();
+                            WritePackCell(data, i);
+                            WritePackCell(data, Motion2);
+                            CreateTimer(0.5, ISDM_ResetCollision, data);     
+                        } 
+                    }
+                }
+            }  
+        }
     }
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -396,14 +438,25 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             GetClientMins(client, mins);
             GetClientMaxs(client, maxs);
 
-            new Handle:GetBlockingProps = TR_TraceHullFilterEx(currentPos, currentPos, mins, maxs, MASK_PLAYERSOLID, TraceEntityFilterPlayer);
-            int prop = 0;
-            if (TR_DidHit(GetBlockingProps) && TR_GetEntityIndex(GetBlockingProps)) {
-                prop = TR_GetEntityIndex(GetBlockingProps);
-                CreateTimer(0.5, ISDM_NocollideProp, TR_GetEntityIndex(GetBlockingProps));
-            }
+            // new Handle:GetBlockingProps = TR_TraceHullFilterEx(currentPos, currentPos, mins, maxs, MASK_PLAYERSOLID, TraceEntityFilterPlayer);
+            // int prop = 0;
+            // if (TR_DidHit(GetBlockingProps) && TR_GetEntityIndex(GetBlockingProps)) {
+            //     prop = TR_GetEntityIndex(GetBlockingProps);
+            //     new String:EntClass[32];
+            //     GetEntityClassname(prop, EntClass, 32);
 
-            CloseHandle(GetBlockingProps);
+            //     if (StrContains(EntClass, "prop_physics") == 0) {
+            //         new Float:propVel[3];
+            //         GetEntPropVector(prop, Prop_Data, "m_vecVelocity", propVel);
+            //         if (GetEntProp(prop, Prop_Send, "m_bAwake") == 0) { // Make sure the prop is sleeping
+            //             if (propVel[0] == 0.0 && propVel[1] == 0.0 && propVel[2] == 0.0) {
+            //                 CreateTimer(0.5, ISDM_NocollideProp, TR_GetEntityIndex(GetBlockingProps));
+            //             }
+            //         }
+            //     }
+            // }
+
+            //CloseHandle(GetBlockingProps);
         
             if (SpeedPerk1Enabled) {
                 if (!IsValidHandle(NearbyEntSearch[client])) {
@@ -515,6 +568,10 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
     return Plugin_Continue;
 }
 
+public bool:TraceEntityFilterPlayer(entity, contentsMask)
+{
+    return entity <= 0 || entity > MaxClients;
+} 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////// ISDM SOUND LOGIC //////////////////////////////////
