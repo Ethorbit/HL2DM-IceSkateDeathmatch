@@ -12,6 +12,7 @@ public Plugin:myinfo =
 #include <sdktools>
 #include <sdkhooks>
 #include <convars>
+#include <collisionhook>
 
 new String:ISDM_Materials[][63] = { // The materials the gamemode uses
     "1speedperk", 
@@ -56,6 +57,7 @@ new Handle:AddPlySkate[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:AddTimeToPressedKey[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:TimeForSkateSound[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:NearbyEntSearch[MAXPLAYERS + 1] = INVALID_HANDLE;
+//new String:PropsToRespawn[2048][]
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
 new Float:PlySkates[MAXPLAYERS + 1] = 0.0;
@@ -205,6 +207,14 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
         return Plugin_Changed;
     }
 
+    // Props will be flying crazy in all directions and players will run into them at extreme speeds, so disable PVE prop damage:
+    if (damagetype & DMG_CRUSH) { // DMG_CRUSH is prop damage
+        if (attacker > MaxClients && attacker || attacker == victim) { // Make sure the attacker it not the victim or that the attacker is not a player
+            damage = 0.0;
+            return Plugin_Changed;       
+        }
+    }
+
     if (GetClientOfUserId(attacker) != 0) { // If there is an attacker
         new String:attackerweapon[32];
         GetClientWeapon(attacker, attackerweapon, 32);
@@ -239,49 +249,24 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////// ISDM COLLISION LOGIC /////////////////////////////////////////////
-public Action:ISDM_ResetCollision(Handle:timer, Handle:data) {
-    ResetPack(data);
-    if (IsPackReadable(data, 1)) {
-        int entity = ReadPackCell(data);
-        int Motion = ReadPackCell(data);
-        if (IsValidEntity(entity)) {
-            SetEntProp(entity, Prop_Data, "m_CollisionGroup", 4);
-            SetEntProp(entity, Prop_Send, "m_CollisionGroup", 4); 
-            if (Motion != -1) { // Make sure the prop is supposed to have motion
-                SetEntityMoveType(entity, MOVETYPE_VPHYSICS);
-            }        
-        }
+public GetPlyHeight(client) {
+    new Float:plyPos[3];
+    new float:ThingBelowPly[3];
+    new Float:PlyDistanceToGround = 0.0;
+    new Handle:TraceZ = TR_TraceRayFilterEx(plyPos, {90.0, 0.0, 0.0}, MASK_PLAYERSOLID, RayType_Infinite, TraceEntityFilterPlayer);
+
+    if (TR_DidHit(TraceZ)) { // Kinda useless since it will always hit, but better safe than sorry
+        TR_GetEndPosition(ThingBelowPly, TraceZ);          
+        PlyDistanceToGround = GetVectorDistance(plyPos, ThingBelowPly);
+
     }
+
+    CloseHandle(TraceZ);
+    return PlyDistanceToGround;
 }
 
-// public Action:ISDM_NocollideProp(Handle:timer, any:entity) {
-//     if (IsValidEntity(entity)) {
-//         new String:EntClass[32];
-//         GetEntityClassname(entity, EntClass, 32);
-//         if (StrContains(EntClass, "prop_physics") == 0) {
-//             int Motion2;
-//             int Motion = GetEntityMoveType(entity);
-//             if (Motion != MOVETYPE_NONE) { 
-//                 SetEntityMoveType(entity, MOVETYPE_NONE);
-//                 Motion2 = 1;
-//             } else {
-//                 Motion2 = -1;
-//             }
-
-//             SetEntProp(entity, Prop_Data, "m_CollisionGroup", 1);
-//             SetEntProp(entity, Prop_Send, "m_CollisionGroup", 1); 
-
-//             new Handle:data = CreateDataPack();
-//             WritePackCell(data, entity);
-//             WritePackCell(data, Motion2);
-//             CreateTimer(2.0, ISDM_ResetCollision, data); // Enable collisions for it again
-//         }
-//     }
-// }
-
-public Action:ISDM_NocollideNearbyEnts(Handle:timer, any:client) { // I tried really hard not to have to do it this way, but traces suck and collision hook is too slow
-    // m_nPhysgunState m_hLastAttacker m_hPhysicsAttacker
-    
+// Lift all nearby props far into the air so that they aren't in the way:
+public Action:ISDM_PushNearbyEnts(Handle:timer, any:client) { 
     new Float:clientOrigin[3];
     GetClientAbsOrigin(client, clientOrigin);
 
@@ -290,37 +275,28 @@ public Action:ISDM_NocollideNearbyEnts(Handle:timer, any:client) { // I tried re
             new String:EntClass[32];
             GetEntityClassname(i, EntClass, 32);    
             if (StrContains(EntClass, "prop_physics") == 0) {
-                if (GetEntProp(i, Prop_Send, "m_bAwake") == 0) { // Make sure the prop is sleeping
+                if (GetEntProp(i, Prop_Data, "m_bThrownByPlayer") == 0) { // Make sure this prop was never thrown by anyone
                     new Float:propOrigin[3]; 
-                    new Float:propSpeed[3]; 
-                    
+                    new Float:propSpeed[3];
+                    new Float:plySpeed[3]; 
+                    GetEntPropVector(client, Prop_Data, "m_vecVelocity", plySpeed); 
                     GetEntPropVector(i, Prop_Data, "m_vecVelocity", propSpeed);
-                    if (propSpeed[0] == 0.0 && propSpeed[1] == 0.0 && propSpeed[2] == 0.0) { // If the prop isn't moving at all
-                        GetEntPropVector(i, Prop_Data, "m_vecOrigin", propOrigin);
-                        if (GetVectorDistance(propOrigin, clientOrigin) < 500.0) { // If the prop is too close to the player
-                            int Motion2; 
-                            int Motion = GetEntityMoveType(i);
-                            if (Motion == MOVETYPE_NONE) { // The prop_physics is marked to have motions disabled in the map editor
-                                Motion2 = -1;
-                            } else {
-                                Motion2 = 1;
+                    GetEntPropVector(i, Prop_Data, "m_vecOrigin", propOrigin);
+                    if (GetVectorDistance(propOrigin, clientOrigin) < 350.0) { // If the prop is too close to the player
+                        if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") != -1) { // Player is on the ground
+                             if (propSpeed[0] == 0.0 && propSpeed[1] == 0.0 && GetPlyHeight(i) == 0.0) { // And the prop
+                                if (GetClientAimTarget(client, false) != i) { // This prop isn't the client's target
+                                    // Launch the prop with the same velocity as the player:
+                                    plySpeed[0] = 0.0;
+                                    plySpeed[1] = 0.0;
+                                    plySpeed[2] = plySpeed[2] + 500.0;
+                                    TeleportEntity(i, NULL_VECTOR, NULL_VECTOR, plySpeed);
+                                }
                             }
-
-                            if (Motion2 == 1) {
-                                SetEntityMoveType(i, MOVETYPE_NONE); // If the collision group is 1 and motion is enabled it can actually cause the server to crash or props to fall out of the map!
-                            }    
-                            
-                            SetEntProp(i, Prop_Data, "m_CollisionGroup", 1);
-                            SetEntProp(i, Prop_Send, "m_CollisionGroup", 1);
-
-                            new Handle:data = CreateDataPack();
-                            WritePackCell(data, i);
-                            WritePackCell(data, Motion2);
-                            CreateTimer(0.5, ISDM_ResetCollision, data);     
-                        } 
-                    }
-                }
-            }  
+                        }
+                    }     
+                }  
+            }
         }
     }
 }
@@ -447,20 +423,20 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
 
             //     if (StrContains(EntClass, "prop_physics") == 0) {
             //         new Float:propVel[3];
-            //         GetEntPropVector(prop, Prop_Data, "m_vecVelocity", propVel);
             //         if (GetEntProp(prop, Prop_Send, "m_bAwake") == 0) { // Make sure the prop is sleeping
-            //             if (propVel[0] == 0.0 && propVel[1] == 0.0 && propVel[2] == 0.0) {
+            //             GetEntPropVector(prop, Prop_Data, "m_vecVelocity", propVel);
+            //             if (propVel[0] == 0.0 && propVel[1] == 0.0 && propVel[2] == 0.0) { // And the prop is not moving at all
             //                 CreateTimer(0.5, ISDM_NocollideProp, TR_GetEntityIndex(GetBlockingProps));
             //             }
             //         }
             //     }
             // }
 
-            //CloseHandle(GetBlockingProps);
+            // CloseHandle(GetBlockingProps);
         
             if (SpeedPerk1Enabled) {
                 if (!IsValidHandle(NearbyEntSearch[client])) {
-                    NearbyEntSearch[client] = CreateTimer(0.1, ISDM_NocollideNearbyEnts, client);
+                    NearbyEntSearch[client] = CreateTimer(0.1, ISDM_PushNearbyEnts, client);
                 }
             }
 
