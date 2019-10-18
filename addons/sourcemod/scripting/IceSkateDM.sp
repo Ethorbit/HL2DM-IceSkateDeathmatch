@@ -5,14 +5,13 @@ public Plugin:myinfo =
 	name = "Ice Skate Deathmatch",
 	author = "Ethorbit",
 	description = "Greatly changes the way deathmatch is played introducing new techniques & perks",
-	version = "1.1.8",
+	version = "1.2.5",
 	url = ""
 }
 
 #include <sdktools>
 #include <sdkhooks>
 #include <convars>
-#include <collisionhook>
 
 new String:ISDM_Materials[][63] = { // The materials the gamemode uses
     "1speedperk", 
@@ -57,7 +56,6 @@ new Handle:AddPlySkate[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:AddTimeToPressedKey[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:TimeForSkateSound[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:NearbyEntSearch[MAXPLAYERS + 1] = INVALID_HANDLE;
-//new String:PropsToRespawn[2048][]
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
 new Float:PlySkates[MAXPLAYERS + 1] = 0.0;
@@ -209,7 +207,7 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
 
     // Props will be flying crazy in all directions and players will run into them at extreme speeds, so disable PVE prop damage:
     if (damagetype & DMG_CRUSH) { // DMG_CRUSH is prop damage
-        if (attacker > MaxClients && attacker || attacker == victim) { // Make sure the attacker it not the victim or that the attacker is not a player
+        if (attacker > MaxClients || attacker == victim) { // Make sure the attacker is the victim or that the attacker is not a player
             damage = 0.0;
             return Plugin_Changed;       
         }
@@ -248,7 +246,7 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////// ISDM COLLISION LOGIC /////////////////////////////////////////////
+/////////////////////// ISDM Automatic Prop Lift Logic /////////////////////////////////////////////
 public GetPlyHeight(client) {
     new Float:plyPos[3];
     new float:ThingBelowPly[3];
@@ -275,6 +273,8 @@ public Action:ISDM_PushNearbyEnts(Handle:timer, any:client) {
             new String:EntClass[32];
             GetEntityClassname(i, EntClass, 32);    
             if (StrContains(EntClass, "prop_physics") == 0) {
+                AcceptEntityInput(i, "Wake");
+
                 if (GetEntProp(i, Prop_Data, "m_bThrownByPlayer") == 0) { // Make sure this prop was never thrown by anyone
                     new Float:propOrigin[3]; 
                     new Float:propSpeed[3];
@@ -286,7 +286,7 @@ public Action:ISDM_PushNearbyEnts(Handle:timer, any:client) {
                         if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") != -1) { // Player is on the ground
                              if (propSpeed[0] == 0.0 && propSpeed[1] == 0.0 && GetPlyHeight(i) == 0.0) { // And the prop
                                 if (GetClientAimTarget(client, false) != i) { // This prop isn't the client's target
-                                    // Launch the prop with the same velocity as the player:
+                                    // Launch the prop in the air with higher Z velocity than the player:
                                     plySpeed[0] = 0.0;
                                     plySpeed[1] = 0.0;
                                     plySpeed[2] = plySpeed[2] + 500.0;
@@ -340,7 +340,6 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
 
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// ISDM AIR LOGIC (& perk) ///////////////////////////////////////
-
             if (NotOnGround) { // Apply air perk
                 new Float:plyPos[3];
                 new Float:ThingBelowPly[3];   
@@ -386,6 +385,12 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             }
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// SPEED PERK #1 //////////////////////////////////
+            if (SpeedPerk1Enabled) { // Push all props near players with speed perk #1
+                if (!IsValidHandle(NearbyEntSearch[client])) {
+                    NearbyEntSearch[client] = CreateTimer(0.1, ISDM_PushNearbyEnts, client);
+                }
+            }
+
             if (IsFast1X || IsFast1Y) { // Apply speed perks #1
                 ISDM_AddPerk(client, ISDM_Perks[ISDM_SpeedPerk1]);
             } else {
@@ -407,39 +412,6 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             }
     /////////////////////////////////////////////////////////////////////////////
     /////////////////////////// BASIC ISDM PLAYER LOGIC ///////////////////////// 
-
-            // Due to prop collisions changing at runtime we need to auto nocollide a prop a player is stuck in:     
-            new Float:mins[3];
-            new Float:maxs[3];
-            GetClientMins(client, mins);
-            GetClientMaxs(client, maxs);
-
-            // new Handle:GetBlockingProps = TR_TraceHullFilterEx(currentPos, currentPos, mins, maxs, MASK_PLAYERSOLID, TraceEntityFilterPlayer);
-            // int prop = 0;
-            // if (TR_DidHit(GetBlockingProps) && TR_GetEntityIndex(GetBlockingProps)) {
-            //     prop = TR_GetEntityIndex(GetBlockingProps);
-            //     new String:EntClass[32];
-            //     GetEntityClassname(prop, EntClass, 32);
-
-            //     if (StrContains(EntClass, "prop_physics") == 0) {
-            //         new Float:propVel[3];
-            //         if (GetEntProp(prop, Prop_Send, "m_bAwake") == 0) { // Make sure the prop is sleeping
-            //             GetEntPropVector(prop, Prop_Data, "m_vecVelocity", propVel);
-            //             if (propVel[0] == 0.0 && propVel[1] == 0.0 && propVel[2] == 0.0) { // And the prop is not moving at all
-            //                 CreateTimer(0.5, ISDM_NocollideProp, TR_GetEntityIndex(GetBlockingProps));
-            //             }
-            //         }
-            //     }
-            // }
-
-            // CloseHandle(GetBlockingProps);
-        
-            if (SpeedPerk1Enabled) {
-                if (!IsValidHandle(NearbyEntSearch[client])) {
-                    NearbyEntSearch[client] = CreateTimer(0.1, ISDM_PushNearbyEnts, client);
-                }
-            }
-
             if (buttons & IN_SPEED) {   
             } else {
                 DeniedSprintSoundPlayed[client] = false;
