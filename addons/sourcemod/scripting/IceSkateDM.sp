@@ -186,10 +186,6 @@ public OnGameFrame() {
 
 public OnEntityCreated(entity, const String:classname[]) {
     if (IsValidEntity(entity)) {  
-        // if (StrContains(classname, "prop_") == 0) {
-        //     SDKHook(entity, SDKHook_GroundEntChangedPost, ISDM_EntOnGround);
-        // }
-
         // if (strcmp(classname, "prop_combine_ball", true) == 0 || strcmp(classname, "grenade_ar2", true) == 0) { // Make projectiles always move faster than the player
         //     CreateTimer(0.3, GetClosestPlyToProj, entity);
         // }
@@ -247,14 +243,7 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////// ISDM Automatic Prop Lift Logic /////////////////////////////////////////////
-// Lift all nearby props far into the air so that they aren't in the way:
-public Action:ISDM_FixProps(Handle:timer, any:entity) {
-    if (GetEntPropEnt(entity, Prop_Data, "m_hPhysicsAttacker") != -1) {
-        SetEntPropEnt(entity, Prop_Data, "m_hPhysicsAttacker", -1); 
-    } 
-}
-
-static bool:IsVisibleTo(client, entity) 
+static bool:ISDM_EntVisible(client, entity) // Will trace from player's eyes to props to determine whether they are visible or not
 {
     new bool:isVisible = false;  
     new Float:EyePos[3], Float:EntPos[3];
@@ -275,51 +264,65 @@ static bool:IsVisibleTo(client, entity)
     return isVisible;
 }
 
-public Action:ISDM_PushNearbyEnts(Handle:timer, any:client) { 
-    new Float:clientOrigin[3];
-    new Float:clientEyes[3];
-    GetClientEyePosition(client, clientEyes);
-    GetClientAbsOrigin(client, clientOrigin);
+public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:PushData) { 
+    ResetPack(PushData);
+    if (IsPackReadable(PushData, 1)) {
+        int client = ReadPackCell(PushData);
+        new Float:PropDist = ReadPackFloat(PushData);
+        new Float:clientOrigin[3];
+        new Float:clientEyes[3];
+        GetClientEyePosition(client, clientEyes);
+        GetClientAbsOrigin(client, clientOrigin);
 
-    for (new i = 0; i < 2048; i++) {
-        if (IsValidEntity(i) && IsValidEntity(client) && IsPlayerAlive(client) && IsClientConnected(client)) {
-            new String:EntClass[32];
-            GetEntityClassname(i, EntClass, 32);    
-            if (StrContains(EntClass, "prop_physics") == 0) {
-                new Float:propOrigin[3];
-                GetEntPropVector(i, Prop_Data, "m_vecOrigin", propOrigin);
+        for (new i = 0; i < 2048; i++) {
+            if (IsValidEntity(i) && IsValidEntity(client) && IsPlayerAlive(client) && IsClientConnected(client)) {
+                new String:EntClass[32];
+                GetEntityClassname(i, EntClass, 32);    
+                if (StrContains(EntClass, "prop_physics") == 0) {
+                    new Float:propOrigin[3];
+                    GetEntPropVector(i, Prop_Data, "m_vecOrigin", propOrigin);
+                    
+                    if (ISDM_EntVisible(client, i)) { // If the player can see the entity
+                        if (GetEntProp(i, Prop_Data, "m_bThrownByPlayer") == 0) { // Make sure this prop was never thrown by anyone 
+                            new Float:propSpeed[3];
+                            new Float:plySpeed[3]; 
+                            GetEntPropVector(client, Prop_Data, "m_vecVelocity", plySpeed); 
+                            GetEntPropVector(i, Prop_Data, "m_vecVelocity", propSpeed);    
 
-                if (IsVisibleTo(client, i)) {
-                    if (GetEntProp(i, Prop_Data, "m_bThrownByPlayer") == 0) { // Make sure this prop was never thrown by anyone 
-                        new Float:propSpeed[3];
-                        new Float:plySpeed[3]; 
-                        GetEntPropVector(client, Prop_Data, "m_vecVelocity", plySpeed); 
-                        GetEntPropVector(i, Prop_Data, "m_vecVelocity", propSpeed);       
-                        if (GetVectorDistance(propOrigin, clientOrigin) < 350.0) { // If the prop is too close to the player
-                            if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") != -1) { // Player is on the ground
-                                if (propSpeed[0] == 0.0 && propSpeed[1] == 0.0) { // And the prop
-                                    if (GetEntPropEnt(i, Prop_Data, "m_hPhysicsAttacker") == -1) { // If no one has picked this up with the gravity gun               
-                                        // 64th spawn flag means motion will enable on physcannon grab:
-                                        if (GetEntProp(i, Prop_Data, "m_spawnflags") & 64) { 
-                                            AcceptEntityInput(i, "EnableMotion");
+                            if (GetVectorDistance(propOrigin, clientOrigin) < PropDist) { // If the prop is too close to the player
+                                PrintToChat(client, "%f", PropDist);
+                                if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") != -1) { // Player is on the ground
+                                    if (propSpeed[0] == 0.0 && propSpeed[1] == 0.0) { // And the prop
+                                        if (GetEntPropEnt(i, Prop_Data, "m_hPhysicsAttacker") == -1) { // If no one has picked this up with the gravity gun               
+                                            // 64th spawn flag means motion will enable on physcannon grab:
+                                            if (GetEntProp(i, Prop_Data, "m_spawnflags") & 64) { 
+                                                AcceptEntityInput(i, "EnableMotion");
+                                            }
+
+                                            // Launch the prop in the air with higher Z velocity than the player:
+                                            plySpeed[0] = 0.0;
+                                            plySpeed[1] = 0.0;
+                                            plySpeed[2] = plySpeed[2] + 500.0;
+                                            TeleportEntity(i, NULL_VECTOR, NULL_VECTOR, plySpeed);
+                                        } else { // The prop has been thrown before
+                                            CreateTimer(3.0, ISDM_FixProps, i); // Fix physics attacker never resetting after impact
                                         }
-
-                                        // Launch the prop in the air with higher Z velocity than the player:
-                                        plySpeed[0] = 0.0;
-                                        plySpeed[1] = 0.0;
-                                        plySpeed[2] = plySpeed[2] + 500.0;
-                                        TeleportEntity(i, NULL_VECTOR, NULL_VECTOR, plySpeed);
-                                    } else { // The prop has been thrown before
-                                        CreateTimer(3.0, ISDM_FixProps, i); // Fix physics attacker never resetting after impact
                                     }
                                 }
-                            }
-                        }     
-                    }         
+                            }     
+                        }         
+                    }
                 }
             }
         }
     }
+}
+
+// Lift all nearby props far into the air so that they aren't in the way:
+public Action:ISDM_FixProps(Handle:timer, any:entity) {
+    if (GetEntPropEnt(entity, Prop_Data, "m_hPhysicsAttacker") != -1) {
+        SetEntPropEnt(entity, Prop_Data, "m_hPhysicsAttacker", -1); 
+    } 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], float angles[3]) {
@@ -407,8 +410,17 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// SPEED PERK #1 //////////////////////////////////
             if (SpeedPerk1Enabled) { // Push all props near players with speed perk #1
+                // Make sure distance increases as the player goes faster or they will run into props still!:
+                new Float:PropDist = 350.0;
+                if (PlySkates[client] > 11.0) {
+                    PropDist = 350.0 + PlySkates[client] * 4; 
+                }
+
                 if (!IsValidHandle(NearbyEntSearch[client])) {
-                    NearbyEntSearch[client] = CreateTimer(0.1, ISDM_PushNearbyEnts, client);
+                    new Handle:PushData = CreateDataPack();
+                    WritePackCell(PushData, client);
+                    WritePackFloat(PushData, PropDist);
+                    NearbyEntSearch[client] = CreateTimer(0.1, ISDM_PushNearbyEnts, PushData);
                 }
             }
 
