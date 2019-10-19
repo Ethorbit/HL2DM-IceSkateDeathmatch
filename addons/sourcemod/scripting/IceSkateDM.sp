@@ -1,4 +1,5 @@
 // Ice Skate Deathmatch is a thing now thanks to Himanshu's choice of commands :)
+// TODO: Add explosive boosting since the gamemode stops players from getting high up easily
 
 public Plugin:myinfo =
 {
@@ -68,6 +69,13 @@ new Float:MAXAIRHEIGHT;
 new Float:SPEED1SPEED;
 new Float:SPEED2SPEED;
 new Float:SPEED3SPEED;
+
+new String:TheRightWeapons[][] = { // Weapons that will have their speeds modified the faster the player goes
+    "weapon_357", 
+    "weapon_crowbar", 
+    "weapon_stunstick",
+    "weapon_pistol"
+}
 
 public OnClientDisconnect_Post(client) { // When a player leaves it is important to reset the client index's statistics
     ISDM_IsHooked[client] = false;
@@ -275,7 +283,7 @@ public Action:ISDM_Touched(entity, entity2) {
         new String:EntClass2[32];
         GetEntityClassname(entity, EntClass, 32);
         GetEntityClassname(entity2, EntClass2, 32);
-        PrintToServer("Ent1 is: %s Ent 2 is: %s", EntClass, EntClass2);
+
         if (strcmp(EntClass, "player") == 0 && strcmp(EntClass2, "player") == 0) { // If both entities are players
             if (entity != entity2) { // They are different players
                 if (ISDM_GetPerk(entity, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(entity, ISDM_Perks[ISDM_SpeedPerk3])) {
@@ -364,15 +372,59 @@ public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:PushData) {
     }
 }
 
-// Lift all nearby props far into the air so that they aren't in the way:
 public Action:ISDM_FixProps(Handle:timer, any:entity) {
     if (GetEntPropEnt(entity, Prop_Data, "m_hPhysicsAttacker") != -1) {
         SetEntPropEnt(entity, Prop_Data, "m_hPhysicsAttacker", -1); 
     } 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////// ISDM WEAPON LOGIC //////////////////////////////////////////////
+// m_flNextPrimaryAttack
+stock ISDM_IncreaseFire(client, Float:Amount) {
+	new ent = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
+	if (ent != -1)
+	{
+		new Float:m_flNextPrimaryAttack = GetEntPropFloat(ent, Prop_Send, "m_flNextPrimaryAttack");
+		new Float:m_flNextSecondaryAttack = GetEntPropFloat(ent, Prop_Send, "m_flNextSecondaryAttack");
+		if (Amount > 12.0)
+		{
+			SetEntPropFloat(ent, Prop_Send, "m_flPlaybackRate", 12.0);
+		} else {
+			SetEntPropFloat(ent, Prop_Send, "m_flPlaybackRate", Amount);
+		}
+		
+		new Float:GameTime = GetGameTime();	
+		new Float:PeTime = (m_flNextPrimaryAttack - GameTime) - ((Amount - 1.0) / 50);
+		new Float:SeTime = (m_flNextSecondaryAttack - GameTime) - ((Amount - 1.0) / 50);
+		new Float:FinalP = PeTime+GameTime;
+		new Float:FinalS = SeTime+GameTime;
+			
+		SetEntPropFloat(ent, Prop_Send, "m_flNextPrimaryAttack", FinalP);
+		SetEntPropFloat(ent, Prop_Send, "m_flNextSecondaryAttack", FinalS);
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+public bool:SearchForWep(String:WepName[32]) { 
+    bool Found = false;
+
+    for (new i = 0; i < sizeof(TheRightWeapons); i++) {
+        if (strcmp(TheRightWeapons[i], WepName) == 0) {
+            Found = true;
+        }
+    }
+
+    return Found;
+}
+
 public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], float angles[3]) {
+    new String:WepClass[32];
     new Float:currentPos[3];
+    int PlyWep = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
+    if (IsValidEntity(PlyWep)) {
+        GetEntityClassname(PlyWep, WepClass, 32);
+    }
+
     GetClientAbsOrigin(client, currentPos);
 
     if (GetEntityMoveType(client) != MOVETYPE_NOCLIP) { // Make sure noclipping players don't skate or get perks, that could be annoying for admins
@@ -448,11 +500,12 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             }          
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// SLOW PERK //////////////////////////////////////
-            if (!IsHigh) { // Apply slow perk
-                ISDM_AddPerk(client, ISDM_Perks[ISDM_SlowPerk]);
-            } else {
-                ISDM_DelFromArray(ISDM_Perks[ISDM_SlowPerk], client);
-            }
+            // if (!IsHigh) { // Apply slow perk
+            //     ISDM_AddPerk(client, ISDM_Perks[ISDM_SlowPerk]);
+            // } else {
+            //     ISDM_DelFromArray(ISDM_Perks[ISDM_SlowPerk], client);
+            // } 
+
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// SPEED PERK #1 //////////////////////////////////
             if (SpeedPerk1Enabled) { // Push all props near players with speed perk #1
@@ -466,15 +519,37 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                     WritePackFloat(PushData, PropDist);
                     NearbyEntSearch[client] = CreateTimer(0.1, ISDM_PushNearbyEnts, PushData);
                 }
+
+                if (buttons & IN_ATTACK || buttons & IN_ATTACK2) {
+                    if (SearchForWep(WepClass)) {    
+                        ISDM_IncreaseFire(client, 1.1);
+                    }
+
+                    if (strcmp(WepClass, "weapon_shotgun") == 0) {
+                        ISDM_IncreaseFire(client, 1.5);
+                    }
+                }
             }
 
             if (IsFast1X || IsFast1Y) { // Apply speed perks #1
                 ISDM_AddPerk(client, ISDM_Perks[ISDM_SpeedPerk1]);
             } else {
                 ISDM_DelFromArray(ISDM_Perks[ISDM_SpeedPerk1], client);
-            }
+            }         
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// SPEED PERK #2 //////////////////////////////////
+            if (SpeedPerk2Enabled) {
+                if (buttons & IN_ATTACK || buttons & IN_ATTACK2) {
+                    if (SearchForWep(WepClass)) {
+                        ISDM_IncreaseFire(client, 1.2);
+                    } 
+
+                    if (strcmp(WepClass, "weapon_shotgun") == 0) {
+                        ISDM_IncreaseFire(client, 2.0);
+                    }
+                }
+            }
+
             if (IsFast2X || IsFast2Y) { // Apply speed perks #2
                 ISDM_AddPerk(client, ISDM_Perks[ISDM_SpeedPerk2]);
             } else {
@@ -482,6 +557,18 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             }
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// SPEED PERK #3 //////////////////////////////////
+            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3])) {
+                if (buttons & IN_ATTACK || buttons & IN_ATTACK2) {
+                    if (SearchForWep(WepClass)) {
+                        ISDM_IncreaseFire(client, 1.3);
+                    } 
+
+                    if (strcmp(WepClass, "weapon_shotgun") == 0) {
+                        ISDM_IncreaseFire(client, 2.5);
+                    }
+                }
+            }
+
             if (IsFast3X || IsFast3Y) { // Apply speed perks #3
                ISDM_AddPerk(client, ISDM_Perks[ISDM_SpeedPerk3]);
             } else {
