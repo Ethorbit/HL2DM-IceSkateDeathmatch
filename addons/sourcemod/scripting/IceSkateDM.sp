@@ -120,8 +120,8 @@ public void OnPluginStart() {
     SetConVarFloat(FindConVar("physcannon_pullforce"), 10000.0, false, false); // Allow players to pull stuff 2.5x farther (not much of a difference)
     ISDM_PerkVars[SlowPerkSpeedConVar] = CreateConVar("ISDM_SlowPerkSpeed", "210.0", "The maximum speed players can go to get Slow Perk", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[FastPerk1SpeedConVar] = CreateConVar("ISDM_FastPerk1Speed", "600.0", "The maximum speed players can go to get Fast Perk #1", FCVAR_SERVER_CAN_EXECUTE);
-    ISDM_PerkVars[FastPerk2SpeedConVar] = CreateConVar("ISDM_FastPerk2Speed", "800.0", "The maximum speed players can go to get Fast Perk #2", FCVAR_SERVER_CAN_EXECUTE);
-    ISDM_PerkVars[FastPerk3SpeedConVar] = CreateConVar("ISDM_FastPerk3Speed", "1100.0", "The maximum speed players can go to get Fast Perk #3", FCVAR_SERVER_CAN_EXECUTE);
+    ISDM_PerkVars[FastPerk2SpeedConVar] = CreateConVar("ISDM_FastPerk2Speed", "1200.0", "The maximum speed players can go to get Fast Perk #2", FCVAR_SERVER_CAN_EXECUTE);
+    ISDM_PerkVars[FastPerk3SpeedConVar] = CreateConVar("ISDM_FastPerk3Speed", "1500.0", "The maximum speed players can go to get Fast Perk #3", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[AirPerkHeightConVar] = CreateConVar("ISDM_AirPerkHeight", "50.0", "The minimum height speed players need to go before they get Air Perk", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_UpdatePerkVars();
 
@@ -169,6 +169,7 @@ public OnGameFrame() {
             if (IsClientInGame(i)) {  
                 if (ISDM_IsHooked[i] == false) { // Ensure that the player is ALWAYS hooked even if plugin is reloaded
                     SDKHook(i, SDKHook_OnTakeDamage, ISDM_PlyTookDmg);
+                    SDKHook(i, SDKHook_Touch, ISDM_Touched);
                     ISDM_IsHooked[i] = true;
                 }
 
@@ -194,6 +195,33 @@ public OnEntityCreated(entity, const String:classname[]) {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// ISDM DAMAGE LOGIC /////////////////////////////////
+ISDM_DealDamage(victim, damage, attacker=0, damageType=DMG_GENERIC, String:weapon[]="") {
+	if (IsValidEntity(victim) && IsValidEntity(attacker) && IsPlayerAlive(victim)) {
+		new String:DmgString[16];
+		new String:DmgTypeString[32];
+        IntToString(damage, DmgString,16);
+		IntToString(damageType, DmgTypeString,32);
+		new pointHurt=CreateEntityByName("point_hurt");
+		
+        if (pointHurt) {
+			DispatchKeyValue(victim, "targetname", "hurtme");
+			DispatchKeyValue(pointHurt, "DamageTarget", "hurtme");
+			DispatchKeyValue(pointHurt, "Damage", DmgString);
+			DispatchKeyValue(pointHurt, "DamageType", DmgTypeString);
+
+			if (!StrEqual(weapon, "")) {
+				DispatchKeyValue(pointHurt,"classname",weapon);
+			}
+
+			DispatchSpawn(pointHurt);
+			AcceptEntityInput(pointHurt, "Hurt", (attacker>0)?attacker:-1);
+			DispatchKeyValue(pointHurt, "classname", "point_hurt");
+			DispatchKeyValue(victim, "targetname", "donthurtme");
+			RemoveEdict(pointHurt);
+		}
+	}
+}
+
 public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &damagetype) {
     if (damagetype & DMG_FALL) { // Disable disgusting fall damage
         damage = 0.0;
@@ -241,10 +269,29 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
     return Plugin_Continue;
 }
 
+public Action:ISDM_Touched(entity, entity2) {
+    if (IsValidEntity(entity) && IsValidEntity(entity2)) {
+        new String:EntClass[32];
+        new String:EntClass2[32];
+        GetEntityClassname(entity, EntClass, 32);
+        GetEntityClassname(entity2, EntClass2, 32);
+        PrintToServer("Ent1 is: %s Ent 2 is: %s", EntClass, EntClass2);
+        if (strcmp(EntClass, "player") == 0 && strcmp(EntClass2, "player") == 0) { // If both entities are players
+            if (entity != entity2) { // They are different players
+                if (ISDM_GetPerk(entity, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(entity, ISDM_Perks[ISDM_SpeedPerk3])) {
+                    ISDM_DealDamage(entity2, 1000, entity, DMG_BULLET, "");
+                }
+
+                if (ISDM_GetPerk(entity2, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(entity2, ISDM_Perks[ISDM_SpeedPerk3])) {
+                    ISDM_DealDamage(entity, 1000, entity2, DMG_BULLET, "");
+                }
+            }
+        }
+    }
+}
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////// ISDM Automatic Prop Lift Logic /////////////////////////////////////////////
-static bool:ISDM_EntVisible(client, entity) // Will trace from player's eyes to props to determine whether they are visible or not
-{
+static bool:ISDM_EntVisible(client, entity) { // Will trace from player's eyes to props to determine whether they are visible or not
     new bool:isVisible = false;  
     new Float:EyePos[3], Float:EntPos[3];
     GetClientEyePosition(client, EyePos); 
@@ -253,7 +300,7 @@ static bool:ISDM_EntVisible(client, entity) // Will trace from player's eyes to 
     new Handle:EyeTrace = TR_TraceHullFilterEx(EyePos, EntPos, {-16.0, -16.0, 0.0}, {16.0, 16.0, 72.0}, MASK_SHOT, TraceEntityFilterPlayer);
     
     if (TR_DidHit(EyeTrace)) {
-        if (TR_GetEntityIndex(EyeTrace) == 0) {
+        if (TR_GetEntityIndex(EyeTrace) == 0) { // 0 means the trace hit part of the map
             isVisible = false;
         } else {
             isVisible = true;
@@ -274,7 +321,7 @@ public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:PushData) {
         GetClientEyePosition(client, clientEyes);
         GetClientAbsOrigin(client, clientOrigin);
 
-        for (new i = 0; i < 2048; i++) {
+        for (new i = 0; i < GetMaxEntities(); i++) {
             if (IsValidEntity(i) && IsValidEntity(client) && IsPlayerAlive(client) && IsClientConnected(client)) {
                 new String:EntClass[32];
                 GetEntityClassname(i, EntClass, 32);    
@@ -290,20 +337,19 @@ public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:PushData) {
                             GetEntPropVector(i, Prop_Data, "m_vecVelocity", propSpeed);    
 
                             if (GetVectorDistance(propOrigin, clientOrigin) < PropDist) { // If the prop is too close to the player
-                                PrintToChat(client, "%f", PropDist);
                                 if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") != -1) { // Player is on the ground
-                                    if (propSpeed[0] == 0.0 && propSpeed[1] == 0.0) { // And the prop
+                                    if (propSpeed[0] == 0.0 && propSpeed[1] == 0.0) { // And the prop has no speed
                                         if (GetEntPropEnt(i, Prop_Data, "m_hPhysicsAttacker") == -1) { // If no one has picked this up with the gravity gun               
                                             // 64th spawn flag means motion will enable on physcannon grab:
                                             if (GetEntProp(i, Prop_Data, "m_spawnflags") & 64) { 
-                                                AcceptEntityInput(i, "EnableMotion");
+                                                AcceptEntityInput(i, "EnableMotion"); // Enable the motion anyways
                                             }
 
                                             // Launch the prop in the air with higher Z velocity than the player:
-                                            plySpeed[0] = 0.0;
-                                            plySpeed[1] = 0.0;
-                                            plySpeed[2] = plySpeed[2] + 500.0;
-                                            TeleportEntity(i, NULL_VECTOR, NULL_VECTOR, plySpeed);
+                                            propSpeed[0] = 0.0;
+                                            propSpeed[1] = 0.0;
+                                            propSpeed[2] = plySpeed[2] + GetRandomFloat(450.0, 600.0);
+                                            TeleportEntity(i, NULL_VECTOR, NULL_VECTOR, propSpeed);
                                         } else { // The prop has been thrown before
                                             CreateTimer(3.0, ISDM_FixProps, i); // Fix physics attacker never resetting after impact
                                         }
@@ -412,10 +458,8 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             if (SpeedPerk1Enabled) { // Push all props near players with speed perk #1
                 // Make sure distance increases as the player goes faster or they will run into props still!:
                 new Float:PropDist = 350.0;
-                if (PlySkates[client] > 11.0) {
-                    PropDist = 350.0 + PlySkates[client] * 4; 
-                }
-
+                PropDist = 350.0 + PlySkates[client] * 4.5; 
+        
                 if (!IsValidHandle(NearbyEntSearch[client])) {
                     new Handle:PushData = CreateDataPack();
                     WritePackCell(PushData, client);
