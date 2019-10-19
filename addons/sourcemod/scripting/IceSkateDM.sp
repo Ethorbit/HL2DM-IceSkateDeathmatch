@@ -377,9 +377,7 @@ public Action:ISDM_FixProps(Handle:timer, any:entity) {
         SetEntPropEnt(entity, Prop_Data, "m_hPhysicsAttacker", -1); 
     } 
 }
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//////////////////////////// ISDM WEAPON LOGIC //////////////////////////////////////////////
-// m_flNextPrimaryAttack
+
 stock ISDM_IncreaseFire(client, Float:Amount) {
 	new ent = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
 	if (ent != -1)
@@ -404,7 +402,6 @@ stock ISDM_IncreaseFire(client, Float:Amount) {
 	}
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 public bool:SearchForWep(String:WepName[32]) { 
     bool Found = false;
 
@@ -454,7 +451,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             bool SpeedPerk1Enabled = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk1]) || ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3]));
             bool SpeedPerk2Enabled = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3]));
 
-            if (NotSlow && NotFast && !IsHigh) { // Display no perks if the user has no perks active
+            if (NotFast && !IsHigh) { // Display no perks if the user has no perks active
                 ISDM_AddPerk(client, ISDM_Perks[ISDM_NoPerks]);
             } else {
                 ISDM_DelFromArray(ISDM_Perks[ISDM_NoPerks], client);
@@ -492,7 +489,6 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 } else {
                     CloseHandle(TraceZ);  
                 }
-
             } else { // If player is on the ground
                 ISDM_DelFromArray(ISDM_Perks[ISDM_AirPerk], client);
                 SetEntPropFloat(client, Prop_Data, "m_flGravity", 1.0);
