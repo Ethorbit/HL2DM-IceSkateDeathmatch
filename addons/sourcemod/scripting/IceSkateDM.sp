@@ -6,7 +6,7 @@ public Plugin:myinfo =
 	name = "Ice Skate Deathmatch",
 	author = "Ethorbit",
 	description = "Greatly changes the way deathmatch is played introducing new techniques & perks",
-	version = "1.2.5",
+	version = "1.2.7",
 	url = ""
 }
 
@@ -65,7 +65,7 @@ new Float:PlyInitialHeight[MAXPLAYERS + 1] = 0.0;
 bool SkatedLeft[MAXPLAYERS + 1] = false;
 bool SkatedRight[MAXPLAYERS + 1] = false;
 bool DeniedSprintSoundPlayed[MAXPLAYERS + 1] = false;
-bool ForceReloaded[MAXPLAYERS + 1] = false;
+bool PlayerIsBoosting[MAXPLAYERS + 1] = false;
 new Float:MAXSLOWSPEED;
 new Float:MAXAIRHEIGHT;
 new Float:SPEED1SPEED;
@@ -95,7 +95,7 @@ public OnClientDisconnect_Post(client) { // When a player leaves it is important
     SkatedLeft[client] = false;
     SkatedRight[client] = false;
     DeniedSprintSoundPlayed[client] = false;
-    ForceReloaded[client] = false;
+    PlayerIsBoosting[client] = false;
 }
 
 enum Perks 
@@ -175,7 +175,7 @@ public void ISDM_DelFromArray(Handle:array, item) {
 }
 
 public OnGameFrame() {
-    ISDM_StopSounds()
+    ISDM_StopSounds();
     for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
         if (IsValidEntity(i)) {
             if (IsClientInGame(i)) {  
@@ -249,6 +249,22 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
         }
     }
 
+    if (damagetype & DMG_BLAST) {
+        if (attacker > MaxClients || attacker == victim) {
+            new String:PlyWepClass[32];
+            int PlyWep = GetEntPropEnt(victim, Prop_Data, "m_hActiveWeapon");
+            GetEntityClassname(PlyWep, PlyWepClass, 32);
+
+            // Do less explosive damage to self for easy boosting:
+            if (strcmp(PlyWepClass, "weapon_smg1") == 0) {
+                damage = damage / 1.3; 
+            }
+
+            ISDM_BoostPlayer(victim, PlyWepClass);
+            return Plugin_Changed;
+        }
+    }
+
     if (GetClientOfUserId(attacker) != 0) { // If there is an attacker
         new String:attackerweapon[32];
         GetClientWeapon(attacker, attackerweapon, 32);
@@ -300,6 +316,40 @@ public Action:ISDM_Touched(entity, entity2) {
             }
         }
     }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////// ISDM BOOSTING LOGIC /////////////////////////////////
+public Action:ISDM_GroundCheck(Handle:timer, any:client) { // Gives the boosting system a chance to actually set them as boosting
+    bool NotOnGround = (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1);
+
+    if (!NotOnGround) {
+        PlayerIsBoosting[client] = false; // They are no longer boosted after hitting the ground
+    }
+}
+
+public ISDM_BoostPlayer(client, String:Weapon[]) {
+    if (IsPlayerAlive(client)) {
+        new Float:PlyVel[3];
+        GetEntPropVector(client, Prop_Data, "m_vecVelocity", PlyVel);
+
+        float direction[3];
+        NormalizeVector(PlyVel, direction);
+
+        if (strcmp(Weapon, "weapon_smg1") == 0) { // SMG1 grenade blasted  
+            ScaleVector(direction, GetRandomFloat(500.0, 1000.0)); 
+            PlyVel[2] = GetRandomFloat(900.0, 1500.0);
+            AddVectors(PlyVel, direction, PlyVel);
+        } else if (strcmp(Weapon, "weapon_rpg") == 0) { // SMG1 grenade blasted  
+            ScaleVector(direction, GetRandomFloat(1000.0, 1500.0)); 
+            PlyVel[2] = GetRandomFloat(1500.0, 2000.0);
+            AddVectors(PlyVel, direction, PlyVel);
+        }
+
+        PlayerIsBoosting[client] = true; // Will stop the automatic gravity system from kicking in
+        PrintToChat(client, "%i", client);
+        TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, PlyVel);
+    }   
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////// ISDM Automatic Prop Lift Logic /////////////////////////////////////////////
@@ -382,25 +432,6 @@ public Action:ISDM_FixProps(Handle:timer, any:entity) {
     } 
 }
 
-stock ISDM_ReloadMultiplier(client, Float:Amount) {
-   // new ent = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
-    new Float:m_flNextAttack = GetEntPropFloat(client, Prop_Send, "m_flNextAttack");
-
-	//if (ent != -1) {
-        new Float:GameTime = GetGameTime();	
-        new Float:eTime = (m_flNextAttack - GameTime) - ((Amount - 1.0 / 50));
-
-        if (Amount > 12.0) {
-			SetEntPropFloat(client, Prop_Send, "m_flPlaybackRate", 12.0);
-		} else {
-			SetEntPropFloat(client, Prop_Send, "m_flPlaybackRate", Amount);
-            SetEntPropFloat(client, Prop_Data, "m_flPlaybackRate", Amount);
-		}
-
-        SetEntPropFloat(client, Prop_Send, "m_flNextAttack", eTime);
-    //}
-}
-
 stock ISDM_IncreaseFire(client, Float:Amount) {
 	new ent = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
 	if (ent != -1) {
@@ -437,7 +468,7 @@ public bool:SearchForWep(String:WepName[32]) {
     return Found;
 }
 
-public Action:ISDM_ForceReload(Handle:timer, any:client) { // An eyeballed timed timer to force reload, supposed to match modified reload times
+public Action:ISDM_ForceReload(Handle:timer, any:client) { // A timed timer to force reload, supposed to match modified reload times
     int PlyWep = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
     SetEntPropFloat(client, Prop_Send, "m_flNextAttack", 1.0);
     SetEntPropFloat(PlyWep, Prop_Send, "m_flNextPrimaryAttack", 1.0);
@@ -449,10 +480,12 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
     new Float:currentPos[3];
     int PlyWep = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
     int Viewmodel = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
-    bool IsReloading = GetEntProp(PlyWep, Prop_Data, "m_bInReload");
+    bool IsReloading = false;
+
 
     if (IsValidEntity(PlyWep)) {
         GetEntityClassname(PlyWep, WepClass, 32);
+        IsReloading = GetEntProp(PlyWep, Prop_Data, "m_bInReload");
     }
 
     GetClientAbsOrigin(client, currentPos);
@@ -498,35 +531,40 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 GetClientAbsOrigin(client, plyPos);     
                 new Handle:TraceZ = TR_TraceRayFilterEx(plyPos, {90.0, 0.0, 0.0}, MASK_PLAYERSOLID, RayType_Infinite, TraceEntityFilterPlayer);
 
-                if (TR_DidHit(TraceZ)) { // Kinda useless since it will always hit, but better safe than sorry
-                    TR_GetEndPosition(ThingBelowPly, TraceZ);          
-                    new Float:PlyDistanceToGround = GetVectorDistance(plyPos, ThingBelowPly);
+                if (PlayerIsBoosting[client] == false) { // Only change their gravity if they aren't boosting themselves
+                    if (TR_DidHit(TraceZ)) { // Kinda useless since it will always hit, but better safe than sorry
+                        TR_GetEndPosition(ThingBelowPly, TraceZ);          
+                        new Float:PlyDistanceToGround = GetVectorDistance(plyPos, ThingBelowPly);
 
-                    if (PlyInitialHeight[client] == 0.0) {
-                        PlyInitialHeight[client] = PlyDistanceToGround;
-                    }
-
-                    if (PlyInitialHeight[client] > 300) { // Make it seem like they are NOT being sucked into the ground when falling from high up
-                        SetEntPropFloat(client, Prop_Data, "m_flGravity", 2.3); 
-                    } else {
-                        if (PlyDistanceToGround > MAXAIRHEIGHT) { // They are officially in the air now
-                            ISDM_AddPerk(client, ISDM_Perks[ISDM_AirPerk]);
+                        if (PlyInitialHeight[client] == 0.0) {
+                            PlyInitialHeight[client] = PlyDistanceToGround;
                         }
 
-                        new Float:GravityEquation = (GetVectorDistance(plyPos, ThingBelowPly) / 50.0); // The higher you are the more brutal the gravity increases (Unless you start falling from high up already)               
-                        if (GravityEquation > 1.0) { // Make sure low gravity never occurs
-                            SetEntPropFloat(client, Prop_Data, "m_flGravity", GravityEquation);   
-                        }   
-                    }  
-                    CloseHandle(TraceZ);  
-                } else {
-                    CloseHandle(TraceZ);  
+                        if (PlyInitialHeight[client] > 300) { // Make it seem like they are NOT being sucked into the ground when falling from high up
+                            SetEntPropFloat(client, Prop_Data, "m_flGravity", 2.3); 
+                        } else {
+                            if (PlyDistanceToGround > MAXAIRHEIGHT) { // They are officially in the air now
+                                ISDM_AddPerk(client, ISDM_Perks[ISDM_AirPerk]);
+                            }
+
+                            new Float:GravityEquation = (GetVectorDistance(plyPos, ThingBelowPly) / 50.0); // The higher you are the more brutal the gravity increases (Unless you start falling from high up already)               
+                            if (GravityEquation > 1.0) { // Make sure low gravity never occurs
+                                SetEntPropFloat(client, Prop_Data, "m_flGravity", GravityEquation);   
+                            }   
+                        }  
+                        CloseHandle(TraceZ);  
+                    } else {
+                        CloseHandle(TraceZ);  
+                    }
+                } else { // The player is boosting themselves with explosions
+                    SetEntPropFloat(client, Prop_Data, "m_flGravity", 2.3); 
                 }
             } else { // If player is on the ground
                 ISDM_DelFromArray(ISDM_Perks[ISDM_AirPerk], client);
                 SetEntPropFloat(client, Prop_Data, "m_flGravity", 1.0);
                 PlyInitialHeight[client] = 0.0;
-            }       
+                CreateTimer(1.0, ISDM_GroundCheck, client);
+            }   
 
             if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {   
                 if (IsReloading) { 
@@ -581,15 +619,13 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 }  
 
                 if (buttons & IN_ATTACK || buttons & IN_ATTACK2) {
-                    if (ForceReloaded[client] == false) {
-                        if (SearchForWep(WepClass)) {    
-                            ISDM_IncreaseFire(client, 1.1);
-                        }
-
-                        if (strcmp(WepClass, "weapon_shotgun") == 0) {
-                            ISDM_IncreaseFire(client, 1.5);
-                        }
+                    if (SearchForWep(WepClass)) {    
+                        ISDM_IncreaseFire(client, 1.1);
                     }
+
+                    if (strcmp(WepClass, "weapon_shotgun") == 0) {
+                        ISDM_IncreaseFire(client, 1.5);
+                    }       
                 }  
             }
 
@@ -626,15 +662,13 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 }
 
                 if (buttons & IN_ATTACK || buttons & IN_ATTACK2) {
-                    if (ForceReloaded[client] == false) {
-                        if (SearchForWep(WepClass)) {
-                            ISDM_IncreaseFire(client, 1.2);
-                        } 
+                    if (SearchForWep(WepClass)) {
+                        ISDM_IncreaseFire(client, 1.2);
+                    } 
 
-                        if (strcmp(WepClass, "weapon_shotgun") == 0) {
-                            ISDM_IncreaseFire(client, 2.0);
-                        }  
-                    }            
+                    if (strcmp(WepClass, "weapon_shotgun") == 0) {
+                        ISDM_IncreaseFire(client, 2.0);
+                    }                    
                 }
             }
 
@@ -647,15 +681,13 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
     //////////////////////////// SPEED PERK #3 //////////////////////////////////
             if (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3])) {
                 if (buttons & IN_ATTACK || buttons & IN_ATTACK2) {
-                    if (ForceReloaded[client] == false) {
-                        if (SearchForWep(WepClass)) {
-                            ISDM_IncreaseFire(client, 1.3);
-                        } 
+                    if (SearchForWep(WepClass)) {
+                        ISDM_IncreaseFire(client, 1.3);
+                    } 
 
-                        if (strcmp(WepClass, "weapon_shotgun") == 0) {
-                            ISDM_IncreaseFire(client, 2.5);
-                        }
-                    }
+                    if (strcmp(WepClass, "weapon_shotgun") == 0) {
+                        ISDM_IncreaseFire(client, 2.5);
+                    }        
                 }
 
                 if (IsReloading) { 
