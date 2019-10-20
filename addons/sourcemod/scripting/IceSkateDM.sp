@@ -57,6 +57,7 @@ new Handle:AddPlySkate[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:AddTimeToPressedKey[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:TimeForSkateSound[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:NearbyEntSearch[MAXPLAYERS + 1] = INVALID_HANDLE;
+new Handle:ForceReloading[MAXPLAYERS + 1] = false;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
 new Float:PlySkates[MAXPLAYERS + 1] = 0.0;
@@ -64,6 +65,7 @@ new Float:PlyInitialHeight[MAXPLAYERS + 1] = 0.0;
 bool SkatedLeft[MAXPLAYERS + 1] = false;
 bool SkatedRight[MAXPLAYERS + 1] = false;
 bool DeniedSprintSoundPlayed[MAXPLAYERS + 1] = false;
+bool ForceReloaded[MAXPLAYERS + 1] = false;
 new Float:MAXSLOWSPEED;
 new Float:MAXAIRHEIGHT;
 new Float:SPEED1SPEED;
@@ -85,6 +87,7 @@ public OnClientDisconnect_Post(client) { // When a player leaves it is important
     AddPlySkate[client] = INVALID_HANDLE;
     AddTimeToPressedKey[client] = INVALID_HANDLE;
     TimeForSkateSound[client] = INVALID_HANDLE;
+    ForceReloading[client] = INVALID_HANDLE;
     ElapsedLeftTime[client] = 0;   
     ElapsedRightTime[client] = 0; 
     PlySkates[client] = 0.0;
@@ -92,6 +95,7 @@ public OnClientDisconnect_Post(client) { // When a player leaves it is important
     SkatedLeft[client] = false;
     SkatedRight[client] = false;
     DeniedSprintSoundPlayed[client] = false;
+    ForceReloaded[client] = false;
 }
 
 enum Perks 
@@ -378,19 +382,38 @@ public Action:ISDM_FixProps(Handle:timer, any:entity) {
     } 
 }
 
+stock ISDM_ReloadMultiplier(client, Float:Amount) {
+   // new ent = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
+    new Float:m_flNextAttack = GetEntPropFloat(client, Prop_Send, "m_flNextAttack");
+
+	//if (ent != -1) {
+        new Float:GameTime = GetGameTime();	
+        new Float:eTime = (m_flNextAttack - GameTime) - ((Amount - 1.0 / 50));
+
+        if (Amount > 12.0) {
+			SetEntPropFloat(client, Prop_Send, "m_flPlaybackRate", 12.0);
+		} else {
+			SetEntPropFloat(client, Prop_Send, "m_flPlaybackRate", Amount);
+            SetEntPropFloat(client, Prop_Data, "m_flPlaybackRate", Amount);
+		}
+
+        SetEntPropFloat(client, Prop_Send, "m_flNextAttack", eTime);
+    //}
+}
+
 stock ISDM_IncreaseFire(client, Float:Amount) {
 	new ent = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
-	if (ent != -1)
-	{
+	if (ent != -1) {
 		new Float:m_flNextPrimaryAttack = GetEntPropFloat(ent, Prop_Send, "m_flNextPrimaryAttack");
 		new Float:m_flNextSecondaryAttack = GetEntPropFloat(ent, Prop_Send, "m_flNextSecondaryAttack");
-		if (Amount > 12.0)
-		{
+        
+		if (Amount > 12.0) {
 			SetEntPropFloat(ent, Prop_Send, "m_flPlaybackRate", 12.0);
 		} else {
 			SetEntPropFloat(ent, Prop_Send, "m_flPlaybackRate", Amount);
+            SetEntPropFloat(ent, Prop_Data, "m_flPlaybackRate", Amount);
 		}
-		
+
 		new Float:GameTime = GetGameTime();	
 		new Float:PeTime = (m_flNextPrimaryAttack - GameTime) - ((Amount - 1.0) / 50);
 		new Float:SeTime = (m_flNextSecondaryAttack - GameTime) - ((Amount - 1.0) / 50);
@@ -414,10 +437,20 @@ public bool:SearchForWep(String:WepName[32]) {
     return Found;
 }
 
+public Action:ISDM_ForceReload(Handle:timer, any:client) { // An eyeballed timed timer to force reload, supposed to match modified reload times
+    int PlyWep = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
+    SetEntPropFloat(client, Prop_Send, "m_flNextAttack", 1.0);
+    SetEntPropFloat(PlyWep, Prop_Send, "m_flNextPrimaryAttack", 1.0);
+    SetEntPropFloat(PlyWep, Prop_Send, "m_flNextSecondaryAttack", 1.0);
+}
+
 public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], float angles[3]) {
     new String:WepClass[32];
     new Float:currentPos[3];
     int PlyWep = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
+    int Viewmodel = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
+    bool IsReloading = GetEntProp(PlyWep, Prop_Data, "m_bInReload");
+
     if (IsValidEntity(PlyWep)) {
         GetEntityClassname(PlyWep, WepClass, 32);
     }
@@ -493,38 +526,71 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 ISDM_DelFromArray(ISDM_Perks[ISDM_AirPerk], client);
                 SetEntPropFloat(client, Prop_Data, "m_flGravity", 1.0);
                 PlyInitialHeight[client] = 0.0;
-            }          
-    /////////////////////////////////////////////////////////////////////////////
-    //////////////////////////// SLOW PERK //////////////////////////////////////
-            // if (!IsHigh) { // Apply slow perk
-            //     ISDM_AddPerk(client, ISDM_Perks[ISDM_SlowPerk]);
-            // } else {
-            //     ISDM_DelFromArray(ISDM_Perks[ISDM_SlowPerk], client);
-            // } 
+            }       
 
+            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {   
+                if (IsReloading) { 
+                    if (!IsValidHandle(ForceReloading[client])) { // Stops causing extreme rapid fire glitch after reloading
+                        if (strcmp(WepClass, "weapon_rpg") != 0) { // Make sure the RPG never can reload faster
+                            new Float:GameTime = GetGameTime();	
+                            SetEntPropFloat(Viewmodel, Prop_Send, "m_flPlaybackRate", 1.0);
+                            SetEntPropFloat(Viewmodel, Prop_Data, "m_flPlaybackRate", 1.0);
+                            ForceReloading[client] = INVALID_HANDLE;
+                        } 
+                    }
+                }  
+            }
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// SPEED PERK #1 //////////////////////////////////
             if (SpeedPerk1Enabled) { // Push all props near players with speed perk #1
                 // Make sure distance increases as the player goes faster or they will run into props still!:
                 new Float:PropDist = 350.0;
-                PropDist = 350.0 + PlySkates[client] * 4.5; 
+                PropDist = 350.0 + PlySkates[client] * 8.5; 
         
                 if (!IsValidHandle(NearbyEntSearch[client])) {
                     new Handle:PushData = CreateDataPack();
                     WritePackCell(PushData, client);
                     WritePackFloat(PushData, PropDist);
                     NearbyEntSearch[client] = CreateTimer(0.1, ISDM_PushNearbyEnts, PushData);
-                }
+                } 
+            }
+
+            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk1])) {
+                if (IsReloading) { 
+                    if (!IsValidHandle(ForceReloading[client])) { // Stops causing extreme rapid fire glitch after reloading
+                        if (strcmp(WepClass, "weapon_rpg") != 0) { // Make sure the RPG never can reload faster
+                            new Float:GameTime = GetGameTime();	
+                            SetEntPropFloat(Viewmodel, Prop_Send, "m_flPlaybackRate", 2.0);
+                            SetEntPropFloat(Viewmodel, Prop_Data, "m_flPlaybackRate", 2.0);
+
+                            if (strcmp(WepClass, "weapon_smg1") == 0 || strcmp(WepClass, "weapon_ar2") == 0) {   
+                                ForceReloading[client] = CreateTimer(2.0, ISDM_DoNothing, client);
+                            }
+
+                            if (strcmp(WepClass, "weapon_357") != 0 && strcmp(WepClass, "weapon_rpg") != 0) {
+                                ForceReloading[client] = CreateTimer(1.0, ISDM_DoNothing, client);
+                                CreateTimer(0.7, ISDM_ForceReload, client);
+                            }   
+
+                            if (strcmp(WepClass, "weapon_357") == 0) {
+                                CreateTimer(1.6, ISDM_ForceReload, client);
+                                ForceReloading[client] = CreateTimer(2.0, ISDM_DoNothing, client);
+                            }
+                        } 
+                    }
+                }  
 
                 if (buttons & IN_ATTACK || buttons & IN_ATTACK2) {
-                    if (SearchForWep(WepClass)) {    
-                        ISDM_IncreaseFire(client, 1.1);
-                    }
+                    if (ForceReloaded[client] == false) {
+                        if (SearchForWep(WepClass)) {    
+                            ISDM_IncreaseFire(client, 1.1);
+                        }
 
-                    if (strcmp(WepClass, "weapon_shotgun") == 0) {
-                        ISDM_IncreaseFire(client, 1.5);
+                        if (strcmp(WepClass, "weapon_shotgun") == 0) {
+                            ISDM_IncreaseFire(client, 1.5);
+                        }
                     }
-                }
+                }  
             }
 
             if (IsFast1X || IsFast1Y) { // Apply speed perks #1
@@ -534,15 +600,41 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             }         
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// SPEED PERK #2 //////////////////////////////////
-            if (SpeedPerk2Enabled) {
-                if (buttons & IN_ATTACK || buttons & IN_ATTACK2) {
-                    if (SearchForWep(WepClass)) {
-                        ISDM_IncreaseFire(client, 1.2);
-                    } 
+            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2])) {
+                if (IsReloading) { 
+                    if (!IsValidHandle(ForceReloading[client])) { // Stops causing extreme rapid fire glitch after reloading
+                        if (strcmp(WepClass, "weapon_rpg") != 0) { // Make sure the RPG never can reload faster
+                            new Float:GameTime = GetGameTime();	
+                            SetEntPropFloat(Viewmodel, Prop_Send, "m_flPlaybackRate", 3.0);
+                            SetEntPropFloat(Viewmodel, Prop_Data, "m_flPlaybackRate", 3.0);
 
-                    if (strcmp(WepClass, "weapon_shotgun") == 0) {
-                        ISDM_IncreaseFire(client, 2.0);
+                            if (strcmp(WepClass, "weapon_smg1") == 0 || strcmp(WepClass, "weapon_ar2") == 0) {   
+                                ForceReloading[client] = CreateTimer(2.0, ISDM_DoNothing, client);
+                            }
+
+                            if (strcmp(WepClass, "weapon_357") != 0 && strcmp(WepClass, "weapon_rpg") != 0) {
+                                ForceReloading[client] = CreateTimer(1.0, ISDM_DoNothing, client);
+                                CreateTimer(0.5, ISDM_ForceReload, client);
+                            }   
+
+                            if (strcmp(WepClass, "weapon_357") == 0) {
+                                CreateTimer(1.3, ISDM_ForceReload, client);
+                                ForceReloading[client] = CreateTimer(2.0, ISDM_DoNothing, client);
+                            }
+                        } 
                     }
+                }
+
+                if (buttons & IN_ATTACK || buttons & IN_ATTACK2) {
+                    if (ForceReloaded[client] == false) {
+                        if (SearchForWep(WepClass)) {
+                            ISDM_IncreaseFire(client, 1.2);
+                        } 
+
+                        if (strcmp(WepClass, "weapon_shotgun") == 0) {
+                            ISDM_IncreaseFire(client, 2.0);
+                        }  
+                    }            
                 }
             }
 
@@ -550,17 +642,43 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 ISDM_AddPerk(client, ISDM_Perks[ISDM_SpeedPerk2]);
             } else {
                 ISDM_DelFromArray(ISDM_Perks[ISDM_SpeedPerk2], client);
-            }
+            }         
     /////////////////////////////////////////////////////////////////////////////
     //////////////////////////// SPEED PERK #3 //////////////////////////////////
             if (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3])) {
                 if (buttons & IN_ATTACK || buttons & IN_ATTACK2) {
-                    if (SearchForWep(WepClass)) {
-                        ISDM_IncreaseFire(client, 1.3);
-                    } 
+                    if (ForceReloaded[client] == false) {
+                        if (SearchForWep(WepClass)) {
+                            ISDM_IncreaseFire(client, 1.3);
+                        } 
 
-                    if (strcmp(WepClass, "weapon_shotgun") == 0) {
-                        ISDM_IncreaseFire(client, 2.5);
+                        if (strcmp(WepClass, "weapon_shotgun") == 0) {
+                            ISDM_IncreaseFire(client, 2.5);
+                        }
+                    }
+                }
+
+                if (IsReloading) { 
+                    if (!IsValidHandle(ForceReloading[client])) { // Stops causing extreme rapid fire glitch after reloading
+                        if (strcmp(WepClass, "weapon_rpg") != 0) { // Make sure the RPG never can reload faster
+                            new Float:GameTime = GetGameTime();	
+                            SetEntPropFloat(Viewmodel, Prop_Send, "m_flPlaybackRate", 4.0);
+                            SetEntPropFloat(Viewmodel, Prop_Data, "m_flPlaybackRate", 4.0);
+
+                            if (strcmp(WepClass, "weapon_smg1") == 0 || strcmp(WepClass, "weapon_ar2") == 0) {   
+                                ForceReloading[client] = CreateTimer(2.0, ISDM_DoNothing, client);
+                            }
+
+                            if (strcmp(WepClass, "weapon_357") != 0 && strcmp(WepClass, "weapon_rpg") != 0) {
+                                ForceReloading[client] = CreateTimer(1.0, ISDM_DoNothing, client);
+                                CreateTimer(0.2, ISDM_ForceReload, client);
+                            }   
+
+                            if (strcmp(WepClass, "weapon_357") == 0) {
+                                CreateTimer(1.0, ISDM_ForceReload, client);
+                                ForceReloading[client] = CreateTimer(2.0, ISDM_DoNothing, client);
+                            }
+                        } 
                     }
                 }
             }
