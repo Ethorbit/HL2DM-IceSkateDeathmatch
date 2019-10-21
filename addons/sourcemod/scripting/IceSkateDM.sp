@@ -4,8 +4,9 @@
 // 2. Add gamemode info somehow 
 // 3. Fix players from both getting kills with the bull 
 // 4. Make vehicles lift at the right times
-// 5. Detect map size, change speeds accordingly (Could maybe use an entity distance checking function to determine distance in the map?)
-// 6. Fix speed perk #3 from not blocking damage sometimes
+// 5. Detect map size, change speeds accordingly 
+// (Could maybe use an entity distance checking function to determine distance in the map?)
+// (Could maybe make a line trace for every prop calculating the max playable height?) (Bigger height = Bigger map)
 // 7. Make gravity system compatible with lifts
 // 8. Fix gun noises from cutting off from the fast firing code
 
@@ -244,14 +245,14 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
 
     // Props will be flying crazy in all directions and players will run into them at extreme speeds, so disable PVE prop damage:
     if (damagetype & DMG_CRUSH) { // DMG_CRUSH is prop damage
-        if (attacker > MaxClients || attacker == victim) { // Make sure the attacker is the victim or that the attacker is not a player
+        if (attacker == victim) { 
             damage = 0.0;
             return Plugin_Changed;       
         }
     }
 
     if (damagetype & DMG_BLAST) {
-        if (attacker > MaxClients || attacker == victim) {
+        if (attacker == victim) {
             new String:PlyWepClass[32];
             int PlyWep = GetEntPropEnt(victim, Prop_Data, "m_hActiveWeapon");
             GetEntityClassname(PlyWep, PlyWepClass, 32);
@@ -259,11 +260,11 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
             // Do less explosive damage to self for easy boosting:
             if (strcmp(PlyWepClass, "weapon_smg1") == 0) {
                 damage = damage / 2; 
-            } 
-
-            if (strcmp(PlyWepClass, "weapon_rpg") == 0) {
+            } else if (strcmp(PlyWepClass, "weapon_rpg") == 0) {
                 damage = damage / 1.3; 
-            } 
+            } else { // Maybe a grenade? Maybe an explosive barrel?
+                damage = damage / 1.5; 
+            }
 
             ISDM_BoostPlayer(victim, PlyWepClass);
             return Plugin_Changed;
@@ -271,7 +272,7 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
     }
 
 
-    if (IsValidEntity(attacker)) { // If there is an attacker
+    if (attacker > 0 && attacker < ISDM_MaxPlayers) { // If there is an attacker
         new String:attackerweapon[32];
         GetClientWeapon(attacker, attackerweapon, 32);
 
@@ -354,6 +355,10 @@ public ISDM_BoostPlayer(client, String:Weapon[]) {
         } else if (strcmp(Weapon, "weapon_rpg") == 0) { // SMG1 grenade blasted  
             ScaleVector(direction, GetRandomFloat(1000.0, 1500.0)); 
             PlyVel[2] = GetRandomFloat(1500.0, 2000.0);
+            AddVectors(PlyVel, direction, PlyVel);
+        } else { // Not from SMG1 grenade or RPG, apply smallest boost
+            ScaleVector(direction, GetRandomFloat(500.0, 800.0)); 
+            PlyVel[2] = GetRandomFloat(900.0, 1000.0);
             AddVectors(PlyVel, direction, PlyVel);
         }
 
