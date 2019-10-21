@@ -197,14 +197,6 @@ public OnGameFrame() {
     }
 }
 
-public OnEntityCreated(entity, const String:classname[]) {
-    if (IsValidEntity(entity)) {  
-        // if (strcmp(classname, "prop_combine_ball", true) == 0 || strcmp(classname, "grenade_ar2", true) == 0) { // Make projectiles always move faster than the player
-        //     CreateTimer(0.3, GetClosestPlyToProj, entity);
-        // }
-    }
-}
-
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// ISDM DAMAGE LOGIC /////////////////////////////////
 ISDM_DealDamage(victim, damage, attacker=0, damageType=DMG_GENERIC, String:weapon[]="") {
@@ -257,8 +249,12 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
 
             // Do less explosive damage to self for easy boosting:
             if (strcmp(PlyWepClass, "weapon_smg1") == 0) {
+                damage = damage / 2; 
+            } 
+
+            if (strcmp(PlyWepClass, "weapon_rpg") == 0) {
                 damage = damage / 1.3; 
-            }
+            } 
 
             ISDM_BoostPlayer(victim, PlyWepClass);
             return Plugin_Changed;
@@ -321,10 +317,12 @@ public Action:ISDM_Touched(entity, entity2) {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// ISDM BOOSTING LOGIC /////////////////////////////////
 public Action:ISDM_GroundCheck(Handle:timer, any:client) { // Gives the boosting system a chance to actually set them as boosting
-    bool NotOnGround = (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1);
+    if (IsValidEntity(client)) {
+        bool NotOnGround = (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1);
 
-    if (!NotOnGround) {
-        PlayerIsBoosting[client] = false; // They are no longer boosted after hitting the ground
+        if (!NotOnGround) {
+            PlayerIsBoosting[client] = false; // They are no longer boosted after hitting the ground
+        }
     }
 }
 
@@ -1070,6 +1068,28 @@ public ISDM_GetPerk(client, perk) {
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////// ISDM PROJECTILE STUFF ////////////////////////
+public OnEntityCreated(entity, const String:classname[]) {
+    if (IsValidEntity(entity)) {  
+        if (strcmp(classname, "prop_combine_ball", false) == 0) { // Make projectiles always move faster than the player
+            CreateTimer(0.2, GetClosestPlyToProj, entity);
+            //CreateTimer(0.2, ISDM_OrbSpawned, entity);
+        }
+
+        if (strcmp(classname, "grenade_ar2", false) == 0) {
+            //item_ammo_SMG1_Grenade
+            float currentSpeed[3];
+            float direction[3];
+            GetEntPropVector(entity, Prop_Data, "m_vecVelocity", currentSpeed); // Projectile's speed
+
+            PrintToServer("The ar2 grenade's id: %i", entity);
+            NormalizeVector(currentSpeed, direction);
+            ScaleVector(direction, 99999.0);
+            AddVectors(currentSpeed, direction, currentSpeed);
+            TeleportEntity(entity, NULL_VECTOR, NULL_VECTOR, currentSpeed); 
+        }
+    }
+}
+
 public Action:GetClosestPlyToProj(Handle:timer, any:entity) { // Calculates the closest player to the projectile entity, assumes this is the owner.
     if (IsValidEntity(entity)) {
         new Float:currentSpeed[3];
@@ -1092,37 +1112,21 @@ public Action:GetClosestPlyToProj(Handle:timer, any:entity) { // Calculates the 
                     } 
                 }
             }
+            
+            if (ISDM_GetPerk(player, ISDM_Perks[ISDM_SpeedPerk1])) {
+                SetEntPropFloat(entity, Prop_Data, "m_flSpeed", 1500.0);
+            }
 
-            new Handle:MultiData = CreateDataPack();
-            WritePackCell(MultiData, entity);
-            WritePackCell(MultiData, player);
-            CreateTimer(0.5, MatchSpeedConstantly, MultiData, 3); // Where the magic happens
+            if (ISDM_GetPerk(player, ISDM_Perks[ISDM_SpeedPerk2])) {
+                SetEntPropFloat(entity, Prop_Data, "m_flSpeed", 2000.0);
+            }
+
+            if (ISDM_GetPerk(player, ISDM_Perks[ISDM_SpeedPerk3])) {
+                SetEntPropFloat(entity, Prop_Data, "m_flSpeed", 2500.0 );
+            }
+            
+            // if (strcmp(entity, "grenade_ar2", false) == 0) {
+            // }
         } 
     }
 }
-
-public Action:MatchSpeedConstantly(Handle:timer, Handle:data) {
-    ResetPack(data);
-    if (IsPackReadable(data, 1)) { // If it isn't readable it means the projectile no longer exists
-        int entity = ReadPackCell(data);
-        int player = ReadPackCell(data);
-    
-        if (!IsValidEntity(entity) || !IsValidEntity(player)) {
-            return Plugin_Stop;
-        }
-
-        float currentSpeed[3];
-        float direction[3];
-        GetEntPropVector(entity, Prop_Data, "m_vecVelocity", currentSpeed); // Projectile's speed
-
-        NormalizeVector(currentSpeed, direction);
-        ScaleVector(direction, 1000.0);
-        AddVectors(currentSpeed, direction, currentSpeed);
-        TeleportEntity(entity, NULL_VECTOR, NULL_VECTOR, currentSpeed); 
-
-        return Plugin_Continue;
-    } else {
-        return Plugin_Stop; // Projectile is gone, time to stop the timer
-    }
-}
-////////////////////////////////////////////////////////////////////////////////////
