@@ -1,19 +1,20 @@
 // Ice Skate Deathmatch is a thing now thanks to Himanshu's choice of commands :)
 // TODO: 
-// 1. Add grenade boosting 
+// 1. Make all the rest of explosives compatible with boosting
 // 2. Add gamemode info somehow 
-// 3. fix players from both getting kills with the bull 
+// 3. Fix players from both getting kills with the bull 
 // 4. Make vehicles lift at the right times
-// 5. Fix download shit
-// 6. Detect map size, change speeds accordingly
-// 7. Fix speed perk #3 from not blocking damage sometimes
+// 5. Detect map size, change speeds accordingly (Could maybe use an entity distance checking function to determine distance in the map?)
+// 6. Fix speed perk #3 from not blocking damage sometimes
+// 7. Make gravity system compatible with lifts
+// 8. Fix gun noises from cutting off from the fast firing code
 
 public Plugin:myinfo =
 {
 	name = "Ice Skate Deathmatch",
 	author = "Ethorbit",
 	description = "Greatly changes the way deathmatch is played introducing new techniques & perks",
-	version = "1.2.7",
+	version = "1.3.0",
 	url = ""
 }
 
@@ -129,7 +130,7 @@ enum PerkConVars
 new ISDM_Perks[Perks];
 new ISDM_PerkVars[PerkConVars];
 
-public void OnPluginStart() {
+public void OnMapStart() { // OnPluginStart() does NOT run every map change resulting in file downloads never taking place!
     ISDM_MaxPlayers = GetMaxClients(); 
     SetConVarInt(FindConVar("sv_footsteps"), 0, false, false); // Footstep sounds are replaced with skating sounds
     SetConVarFloat(FindConVar("sv_friction"), 0.5, false, false); // No other way found so far to allow players to slide :(
@@ -154,7 +155,6 @@ public void OnPluginStart() {
         Format(VMTs, MaxMatLength, "materials/IceSkateDM/%s.vmt", ISDM_Materials[i]);
         AddFileToDownloadsTable(VTFs);
         AddFileToDownloadsTable(VMTs);
-        PrecacheDecal(VTFs);
     }
 
     for (new i = 0; i < sizeof(ISDM_Sounds); i++) { // Loop through sounds and force downloads too
@@ -270,7 +270,8 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
         }
     }
 
-    if (GetClientOfUserId(attacker) != 0) { // If there is an attacker
+
+    if (IsValidEntity(attacker)) { // If there is an attacker
         new String:attackerweapon[32];
         GetClientWeapon(attacker, attackerweapon, 32);
 
@@ -293,10 +294,13 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
             return Plugin_Changed;
         }
 
-        if (damagetype & DMG_CRUSH || damagetype & DMG_DISSOLVE && ISDM_GetPerk(victim, ISDM_Perks[ISDM_SpeedPerk3])) { 
-            damage = 0.0;
-            return Plugin_Changed;
-        }
+        if (damagetype & DMG_CRUSH || damagetype & DMG_DISSOLVE) {
+            if (ISDM_GetPerk(victim, ISDM_Perks[ISDM_SpeedPerk3])) {
+                PrintToChat(victim, "Saved you from damage!"); 
+                damage = 0.0;
+                return Plugin_Changed;
+            }
+        } 
     }
         
     return Plugin_Continue;
@@ -596,7 +600,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                     PushData[client] = CreateDataPack();
                     WritePackCell(PushData[client], client);
                     WritePackFloat(PushData[client], PropDist);
-                    NearbyEntSearch[client] = CreateTimer(0.1, ISDM_PushNearbyEnts, PushData[client]);
+                    NearbyEntSearch[client] = CreateTimer(0.05, ISDM_PushNearbyEnts, PushData[client]);
                 } 
             }
 
