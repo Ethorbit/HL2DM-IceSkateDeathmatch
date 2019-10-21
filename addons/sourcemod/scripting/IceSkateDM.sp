@@ -1,14 +1,13 @@
 // Ice Skate Deathmatch is a thing now thanks to Himanshu's choice of commands :)
 // TODO: 
-// 1. Make all the rest of explosives compatible with boosting
 // 2. Add gamemode info somehow 
 // 3. Fix players from both getting kills with the bull 
-// 4. Make vehicles lift at the right times
 // 5. Detect map size, change speeds accordingly 
 // (Could maybe use an entity distance checking function to determine distance in the map?)
 // (Could maybe make a line trace for every prop calculating the max playable height?) (Bigger height = Bigger map)
-// 7. Make gravity system compatible with lifts
+// 7. Make gravity system compatible with map lifts (Maybe check if player is in a trigger_push entity?)
 // 8. Fix gun noises from cutting off from the fast firing code
+// 9. Fix swimming being completely broken and not working
 
 public Plugin:myinfo =
 {
@@ -72,6 +71,7 @@ int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
 new Float:PlySkates[MAXPLAYERS + 1] = 0.0;
 new Float:PlyInitialHeight[MAXPLAYERS + 1] = 0.0;
+new Float:PlyDistAboveGround[MAXPLAYERS + 1] = 0.0;
 bool SkatedLeft[MAXPLAYERS + 1] = false;
 bool SkatedRight[MAXPLAYERS + 1] = false;
 bool DeniedSprintSoundPlayed[MAXPLAYERS + 1] = false;
@@ -103,6 +103,7 @@ public OnClientDisconnect_Post(client) { // When a player leaves it is important
     ElapsedRightTime[client] = 0; 
     PlySkates[client] = 0.0;
     PlyInitialHeight[client] = 0.0;
+    PlyDistAboveGround[client] = 0.0;
     SkatedLeft[client] = false;
     SkatedRight[client] = false;
     DeniedSprintSoundPlayed[client] = false;
@@ -414,7 +415,8 @@ public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:data) {
                             GetEntPropVector(i, Prop_Data, "m_vecVelocity", propSpeed);    
 
                             if (GetVectorDistance(propOrigin, clientOrigin) < PropDist) { // If the prop is too close to the player
-                                if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") != -1) { // Player is on the ground
+                                // Player is on the ground or is low above the ground:
+                                if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") != -1 || PlyDistAboveGround[client] < 400.0) { 
                                     if (propSpeed[0] == 0.0 && propSpeed[1] == 0.0) { // And the prop has no speed
                                         if (GetEntPropEnt(i, Prop_Data, "m_hPhysicsAttacker") == -1) { // If no one has picked this up with the gravity gun               
                                             // 64th spawn flag means motion will enable on physcannon grab:
@@ -438,7 +440,7 @@ public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:data) {
                 }
             }
         }
-        CloseHandle(PushData[client]);
+        CloseHandle(PushData[client]); 
     }
 }
 
@@ -551,6 +553,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                     if (TR_DidHit(TraceZ)) { // Kinda useless since it will always hit, but better safe than sorry
                         TR_GetEndPosition(ThingBelowPly, TraceZ);          
                         new Float:PlyDistanceToGround = GetVectorDistance(plyPos, ThingBelowPly);
+                        PlyDistAboveGround[client] = PlyDistanceToGround;
 
                         if (PlyInitialHeight[client] == 0.0) {
                             PlyInitialHeight[client] = PlyDistanceToGround;
@@ -598,14 +601,20 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
     //////////////////////////// SPEED PERK #1 //////////////////////////////////
             if (SpeedPerk1Enabled) { // Push all props near players with speed perk #1
                 // Make sure distance increases as the player goes faster or they will run into props still!:
-                new Float:PropDist = 350.0;
-                PropDist = 350.0 + PlySkates[client] * 8.5; 
+                new Float:PropDist = x + y;
+                if (PropDist < 0) { // Turn the negative x/y velocity into positive velocity
+                    PropDist = PropDist * -1; 
+                }
+
+                if (PropDist > 500.0 || PropDist < -500.0) { // Don't make the radius so ridiculously big
+                    PropDist = PropDist / 2;
+                }
         
                 if (!IsValidHandle(NearbyEntSearch[client])) {
                     PushData[client] = CreateDataPack();
                     WritePackCell(PushData[client], client);
                     WritePackFloat(PushData[client], PropDist);
-                    NearbyEntSearch[client] = CreateTimer(0.05, ISDM_PushNearbyEnts, PushData[client]);
+                    NearbyEntSearch[client] = CreateTimer(0.01, ISDM_PushNearbyEnts, PushData[client]);
                 } 
             }
 
