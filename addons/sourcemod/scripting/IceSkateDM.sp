@@ -8,6 +8,7 @@
 // 7. Make gravity system compatible with map lifts (Maybe check if player is in a trigger_push entity?)
 // 8. Fix gun noises from cutting off from the fast firing code
 // 9. Fix swimming being completely broken and not working
+// 10. Make DMG_FALL removal compatible with stuff like trigger_hurt entities
 
 public Plugin:myinfo =
 {
@@ -238,18 +239,25 @@ ISDM_DealDamage(victim, damage, attacker=0, damageType=DMG_GENERIC, String:weapo
 }
 
 public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &damagetype) {
+    // Props will be flying crazy in all directions and players will run into them at extreme speeds, so disable PVE prop damage:
+    if (damagetype & DMG_CRUSH) { // DMG_CRUSH is prop damage
+        damage = 0.0; 
+        
+        if (IsValidEntity(attacker)) {
+            if (attacker != victim && inflictor > ISDM_MaxPlayers) { // Make sure the inflictor is not a player & that the player is not suiciding with a prop
+                if (inflictor != attacker) { // Make sure the prop is not the attacker as well, because if it is than that's PVE damage
+                    damage = 1000.0; 
+                } 
+            }
+        }
+
+        return Plugin_Changed;  
+    }
+
     if (damagetype & DMG_FALL) { // Disable disgusting fall damage
         damage = 0.0;
         ISDM_ImpactSound(victim); // Function to replace the fall damage sound
         return Plugin_Changed;
-    }
-
-    // Props will be flying crazy in all directions and players will run into them at extreme speeds, so disable PVE prop damage:
-    if (damagetype & DMG_CRUSH) { // DMG_CRUSH is prop damage
-        if (attacker == victim) { 
-            damage = 0.0;
-            return Plugin_Changed;       
-        }
     }
 
     if (damagetype & DMG_BLAST) {
@@ -298,7 +306,6 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
 
         if (damagetype & DMG_CRUSH || damagetype & DMG_DISSOLVE) {
             if (ISDM_GetPerk(victim, ISDM_Perks[ISDM_SpeedPerk3])) {
-                PrintToChat(victim, "Saved you from damage!"); 
                 damage = 0.0;
                 return Plugin_Changed;
             }
