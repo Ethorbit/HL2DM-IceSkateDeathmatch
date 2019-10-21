@@ -64,6 +64,7 @@ new Handle:AddPlySkate[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:AddTimeToPressedKey[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:TimeForSkateSound[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:NearbyEntSearch[MAXPLAYERS + 1] = INVALID_HANDLE;
+new Handle:PushData[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ForceReloading[MAXPLAYERS + 1] = false;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
@@ -95,6 +96,7 @@ public OnClientDisconnect_Post(client) { // When a player leaves it is important
     AddTimeToPressedKey[client] = INVALID_HANDLE;
     TimeForSkateSound[client] = INVALID_HANDLE;
     ForceReloading[client] = INVALID_HANDLE;
+    PushData[client] = INVALID_HANDLE;
     ElapsedLeftTime[client] = 0;   
     ElapsedRightTime[client] = 0; 
     PlySkates[client] = 0.0;
@@ -377,11 +379,11 @@ static bool:ISDM_EntVisible(client, entity) { // Will trace from player's eyes t
     return isVisible;
 }
 
-public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:PushData) { 
-    ResetPack(PushData);
-    if (IsPackReadable(PushData, 1)) {
-        int client = ReadPackCell(PushData);
-        new Float:PropDist = ReadPackFloat(PushData);
+public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:data) { 
+    ResetPack(data);
+    if (IsPackReadable(data, 1)) {
+        int client = ReadPackCell(data);
+        new Float:PropDist = ReadPackFloat(data);
         new Float:clientOrigin[3];
         new Float:clientEyes[3];
         GetClientEyePosition(client, clientEyes);
@@ -427,6 +429,7 @@ public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:PushData) {
                 }
             }
         }
+        CloseHandle(PushData[client]);
     }
 }
 
@@ -590,11 +593,10 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 PropDist = 350.0 + PlySkates[client] * 8.5; 
         
                 if (!IsValidHandle(NearbyEntSearch[client])) {
-                    new Handle:PushData = CreateDataPack();
-                    WritePackCell(PushData, client);
-                    WritePackFloat(PushData, PropDist);
-                    NearbyEntSearch[client] = CreateTimer(0.1, ISDM_PushNearbyEnts, PushData);
-                    CloseHandle(PushData);
+                    PushData[client] = CreateDataPack();
+                    WritePackCell(PushData[client], client);
+                    WritePackFloat(PushData[client], PropDist);
+                    NearbyEntSearch[client] = CreateTimer(0.1, ISDM_PushNearbyEnts, PushData[client]);
                 } 
             }
 
