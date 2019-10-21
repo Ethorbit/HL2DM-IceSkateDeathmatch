@@ -1,5 +1,12 @@
 // Ice Skate Deathmatch is a thing now thanks to Himanshu's choice of commands :)
-// TODO: Add explosive boosting since the gamemode stops players from getting high up easily
+// TODO: 
+// 1. Add grenade boosting 
+// 2. Add gamemode info somehow 
+// 3. fix players from both getting kills with the bull 
+// 4. Make vehicles lift at the right times
+// 5. Fix download shit
+// 6. Detect map size, change speeds accordingly
+// 7. Fix speed perk #3 from not blocking damage sometimes
 
 public Plugin:myinfo =
 {
@@ -345,7 +352,6 @@ public ISDM_BoostPlayer(client, String:Weapon[]) {
         }
 
         PlayerIsBoosting[client] = true; // Will stop the automatic gravity system from kicking in
-        PrintToChat(client, "%i", client);
         TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, PlyVel);
     }   
 }
@@ -588,6 +594,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                     WritePackCell(PushData, client);
                     WritePackFloat(PushData, PropDist);
                     NearbyEntSearch[client] = CreateTimer(0.1, ISDM_PushNearbyEnts, PushData);
+                    CloseHandle(PushData);
                 } 
             }
 
@@ -1072,21 +1079,17 @@ public OnEntityCreated(entity, const String:classname[]) {
     if (IsValidEntity(entity)) {  
         if (strcmp(classname, "prop_combine_ball", false) == 0) { // Make projectiles always move faster than the player
             CreateTimer(0.2, GetClosestPlyToProj, entity);
-            //CreateTimer(0.2, ISDM_OrbSpawned, entity);
         }
 
-        if (strcmp(classname, "grenade_ar2", false) == 0) {
-            //item_ammo_SMG1_Grenade
-            float currentSpeed[3];
-            float direction[3];
-            GetEntPropVector(entity, Prop_Data, "m_vecVelocity", currentSpeed); // Projectile's speed
-
-            PrintToServer("The ar2 grenade's id: %i", entity);
-            NormalizeVector(currentSpeed, direction);
-            ScaleVector(direction, 99999.0);
-            AddVectors(currentSpeed, direction, currentSpeed);
-            TeleportEntity(entity, NULL_VECTOR, NULL_VECTOR, currentSpeed); 
-        }
+        // if (strcmp(classname, "grenade_ar2", false) == 0) {
+        //     float currentSpeed[3];
+        //     float direction[3];
+        //     GetEntPropVector(entity, Prop_Data, "m_vecVelocity", currentSpeed); // Projectile's speed
+        //     NormalizeVector(currentSpeed, direction);
+        //     ScaleVector(direction, 99999.0);
+        //     AddVectors(currentSpeed, direction, currentSpeed);
+        //     TeleportEntity(entity, NULL_VECTOR, NULL_VECTOR, currentSpeed); 
+        // }
     }
 }
 
@@ -1124,9 +1127,6 @@ public Action:GetClosestPlyToProj(Handle:timer, any:entity) { // Calculates the 
             if (ISDM_GetPerk(player, ISDM_Perks[ISDM_SpeedPerk3])) {
                 SetEntPropFloat(entity, Prop_Data, "m_flSpeed", 2500.0 );
             }
-            
-            // if (strcmp(entity, "grenade_ar2", false) == 0) {
-            // }
         } 
     }
 }
