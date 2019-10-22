@@ -67,7 +67,6 @@ new Handle:AddTimeToPressedKey[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:TimeForSkateSound[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:NearbyEntSearch[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:PushData[MAXPLAYERS + 1] = INVALID_HANDLE;
-new Handle:DistData[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:CheckingForTriggers[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ForceReloading[MAXPLAYERS + 1] = false;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
@@ -103,7 +102,7 @@ public ISDM_ResetPlyStats(client) {
     TimeForSkateSound[client] = INVALID_HANDLE;
     ForceReloading[client] = INVALID_HANDLE;
     PushData[client] = INVALID_HANDLE;
-    DistData[client] = INVALID_HANDLE;
+    CheckingForTriggers[client] = INVALID_HANDLE;
     ElapsedLeftTime[client] = 0;   
     ElapsedRightTime[client] = 0; 
     PlySkates[client] = 0.0;
@@ -1173,6 +1172,11 @@ public bool:IDM_NearTriggers(any:client) { // Loops through all trigger_brush en
 }
 
 public Action:ISDM_CheckPlysNearTriggers(Handle:timer, any:entity) { // A looping timer to make sure the player never breaks out of the gravity system
+    if (CheckingForTriggers[entity] == INVALID_HANDLE) {
+        KillTimer(timer);
+        return Plugin_Stop;
+    } 
+    
     if (!IDM_NearTriggers(entity)) {
         AllowNormalGravity[entity] = false; // They are not near a trigger anymore, so resume gravity system for them 
         CheckingForTriggers[entity] = INVALID_HANDLE;
