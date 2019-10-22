@@ -5,10 +5,11 @@
 // 5. Detect map size, change speeds accordingly 
 // (Could maybe use an entity distance checking function to determine distance in the map?)
 // (Could maybe make a line trace for every prop calculating the max playable height?) (Bigger height = Bigger map)
-// 7. Make gravity system compatible with map lifts (Maybe check if player is in a trigger_push entity?)
+// 7. Make gravity system compatible with map lifts (Maybe check if player is in a trigger_push entity?)(Hook trigger brushes from OnStartTouch?)
 // 8. Fix gun noises from cutting off from the fast firing code
 // 9. Fix swimming being completely broken and not working
 // 10. Make DMG_FALL removal compatible with stuff like trigger_hurt entities
+// 11. Add perk player colors
 
 public Plugin:myinfo =
 {
@@ -67,6 +68,7 @@ new Handle:AddTimeToPressedKey[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:TimeForSkateSound[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:NearbyEntSearch[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:PushData[MAXPLAYERS + 1] = INVALID_HANDLE;
+new Handle:DistData[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ForceReloading[MAXPLAYERS + 1] = false;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
@@ -77,20 +79,21 @@ bool SkatedLeft[MAXPLAYERS + 1] = false;
 bool SkatedRight[MAXPLAYERS + 1] = false;
 bool DeniedSprintSoundPlayed[MAXPLAYERS + 1] = false;
 bool PlayerIsBoosting[MAXPLAYERS + 1] = false;
+bool AllowNormalGravity[MAXPLAYERS + 1] = false;
 new Float:MAXSLOWSPEED;
 new Float:MAXAIRHEIGHT;
 new Float:SPEED1SPEED;
 new Float:SPEED2SPEED;
 new Float:SPEED3SPEED;
 
-new String:TheRightWeapons[][] = { // Weapons that will have their speeds modified the faster the player goes
+new String:TheRightWeapons[][] = { // Weapons that will have their fire speeds (not reload speeds) modified by speed perks
     "weapon_357", 
     "weapon_crowbar", 
     "weapon_stunstick",
     "weapon_pistol"
 }
 
-public OnClientDisconnect_Post(client) { // When a player leaves it is important to reset the client index's statistics
+public ISDM_ResetPlyStats(client) {
     ISDM_IsHooked[client] = false;
     AddDirection[client] = INVALID_HANDLE;
     ResolveDirectionsLeft[client] = INVALID_HANDLE;
@@ -100,6 +103,7 @@ public OnClientDisconnect_Post(client) { // When a player leaves it is important
     TimeForSkateSound[client] = INVALID_HANDLE;
     ForceReloading[client] = INVALID_HANDLE;
     PushData[client] = INVALID_HANDLE;
+    DistData[client] = INVALID_HANDLE;
     ElapsedLeftTime[client] = 0;   
     ElapsedRightTime[client] = 0; 
     PlySkates[client] = 0.0;
@@ -109,6 +113,11 @@ public OnClientDisconnect_Post(client) { // When a player leaves it is important
     SkatedRight[client] = false;
     DeniedSprintSoundPlayed[client] = false;
     PlayerIsBoosting[client] = false;
+    AllowNormalGravity[client] = false;
+}
+
+public OnClientDisconnect_Post(client) { // When a player leaves it is important to reset the client index's statistics
+    ISDM_ResetPlyStats(client);
 }
 
 enum Perks 
@@ -556,41 +565,43 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 GetClientAbsOrigin(client, plyPos);     
                 new Handle:TraceZ = TR_TraceRayFilterEx(plyPos, {90.0, 0.0, 0.0}, MASK_PLAYERSOLID, RayType_Infinite, TraceEntityFilterPlayer);
 
-                if (PlayerIsBoosting[client] == false) { // Only change their gravity if they aren't boosting themselves
-                    if (TR_DidHit(TraceZ)) { // Kinda useless since it will always hit, but better safe than sorry
-                        TR_GetEndPosition(ThingBelowPly, TraceZ);          
-                        new Float:PlyDistanceToGround = GetVectorDistance(plyPos, ThingBelowPly);
-                        PlyDistAboveGround[client] = PlyDistanceToGround;
+                if (AllowNormalGravity[client] == false) { // Allow normal gravity if they are in a trigger_push entity
+                    if (PlayerIsBoosting[client] == false) { // Only change their gravity if they aren't boosting themselves
+                        if (TR_DidHit(TraceZ)) { // Kinda useless since it will always hit, but better safe than sorry
+                            TR_GetEndPosition(ThingBelowPly, TraceZ);          
+                            new Float:PlyDistanceToGround = GetVectorDistance(plyPos, ThingBelowPly);
+                            PlyDistAboveGround[client] = PlyDistanceToGround;
 
-                        if (PlyInitialHeight[client] == 0.0) {
-                            PlyInitialHeight[client] = PlyDistanceToGround;
-                        }
-
-                        if (PlyInitialHeight[client] > 300) { // Make it seem like they are NOT being sucked into the ground when falling from high up
-                            SetEntPropFloat(client, Prop_Data, "m_flGravity", 2.3); 
-                        } else {
-                            if (PlyDistanceToGround > MAXAIRHEIGHT) { // They are officially in the air now
-                                ISDM_AddPerk(client, ISDM_Perks[ISDM_AirPerk]);
+                            if (PlyInitialHeight[client] == 0.0) {
+                                PlyInitialHeight[client] = PlyDistanceToGround;
                             }
 
-                            new Float:GravityEquation = (GetVectorDistance(plyPos, ThingBelowPly) / 50.0); // The higher you are the more brutal the gravity increases (Unless you start falling from high up already)               
-                            if (GravityEquation > 1.0) { // Make sure low gravity never occurs
-                                SetEntPropFloat(client, Prop_Data, "m_flGravity", GravityEquation);   
-                            }   
-                        }  
-                        CloseHandle(TraceZ);  
-                    } else {
-                        CloseHandle(TraceZ);  
+                            if (PlyInitialHeight[client] > 300) { // Make it seem like they are NOT being sucked into the ground when falling from high up
+                                SetEntPropFloat(client, Prop_Data, "m_flGravity", 2.3); 
+                            } else {
+                                if (PlyDistanceToGround > MAXAIRHEIGHT) { // They are officially in the air now
+                                    ISDM_AddPerk(client, ISDM_Perks[ISDM_AirPerk]);
+                                }
+
+                                new Float:GravityEquation = (GetVectorDistance(plyPos, ThingBelowPly) / 50.0); // The higher you are the more brutal the gravity increases (Unless you start falling from high up already)               
+                                if (GravityEquation > 1.0) { // Make sure low gravity never occurs
+                                    SetEntPropFloat(client, Prop_Data, "m_flGravity", GravityEquation);   
+                                }   
+                            }  
+                            CloseHandle(TraceZ);  
+                        } else {
+                            CloseHandle(TraceZ);  
+                        }
+                    } else { // The player is boosting themselves with explosions
+                        SetEntPropFloat(client, Prop_Data, "m_flGravity", 2.3); 
                     }
-                } else { // The player is boosting themselves with explosions
-                    SetEntPropFloat(client, Prop_Data, "m_flGravity", 2.3); 
-                }
+                } 
             } else { // If player is on the ground
                 ISDM_DelFromArray(ISDM_Perks[ISDM_AirPerk], client);
                 SetEntPropFloat(client, Prop_Data, "m_flGravity", 1.0);
                 PlyInitialHeight[client] = 0.0;
                 CreateTimer(1.0, ISDM_GroundCheck, client);
-            }   
+            }  
 
             if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {   
                 if (IsReloading) { 
@@ -1101,24 +1112,81 @@ public ISDM_GetPerk(client, perk) {
     return HasPerk;
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////// ISDM PROJECTILE STUFF ////////////////////////
+/////////////////////////// ISDM ENTITY LOGIC ////////////////////////
 public OnEntityCreated(entity, const String:classname[]) {
     if (IsValidEntity(entity)) {  
-        if (strcmp(classname, "prop_combine_ball", false) == 0) { // Make projectiles always move faster than the player
+        if (strcmp(classname, "prop_combine_ball", false) == 0) { // Make AR2 orb speed scale with speed perks
             CreateTimer(0.2, GetClosestPlyToProj, entity);
         }
 
-        // if (strcmp(classname, "grenade_ar2", false) == 0) {
-        //     float currentSpeed[3];
-        //     float direction[3];
-        //     GetEntPropVector(entity, Prop_Data, "m_vecVelocity", currentSpeed); // Projectile's speed
-        //     NormalizeVector(currentSpeed, direction);
-        //     ScaleVector(direction, 99999.0);
-        //     AddVectors(currentSpeed, direction, currentSpeed);
-        //     TeleportEntity(entity, NULL_VECTOR, NULL_VECTOR, currentSpeed); 
-        // }
+        if (strcmp(classname, "trigger_push") == 0) { // Hook trigger_push entities for collision detection
+            SDKHook(entity, SDKHook_StartTouch, ISDM_TriggerTouch);
+            SDKHook(entity, SDKHook_EndTouchPost, ISDM_TriggerLeave);
+        }
     }
 }
+
+public bool:IDM_NearTriggers(any:client) { // Loops through all trigger_brush entities and checks distance to selected player
+    bool near = false;
+    for (new i = 0; i <= GetMaxEntities(); i++) {
+        if (IsValidEntity(i)) {
+            if (near == true) { // If it's true then we already got the answer
+                break;
+            }
+
+            new String:EntClass[32];
+            GetEntityClassname(i, EntClass, 32);
+
+            if (strcmp(EntClass, "trigger_push") == 0) {
+                new Float:PlyPos[3];
+                new Float:EntPos[3];
+                GetClientAbsOrigin(client, PlyPos);
+                GetEntPropVector(i, Prop_Data, "m_vecOrigin", EntPos);
+
+                if (GetVectorDistance(PlyPos, EntPos) < 200.0) {
+                    near = true; // Player is really close to a trigger_push entity
+                }
+            }
+        }
+    }
+
+    return near;
+}
+
+public Action:ISDM_CheckPlysNearTriggers(Handle:timer, any:entity) { // A looping timer to make sure the player never breaks out of the gravity system
+    //for (new i = 0; i <= ISDM_MaxPlayers; i++) {
+        //if (DistData[client] != INVALID_HANDLE) { 
+        if (!IDM_NearTriggers(entity)) {
+            AllowNormalGravity[entity] = false; // They are not near a trigger anymore, so resume gravity system for them
+            PrintToChat(entity, "You're no longer in a trigger_push");  
+            KillTimer(timer); // Stop looping
+        }
+        //}
+    //}
+} 
+
+public Action:ISDM_TriggerTouch(entity, entity2) { // Player is touching a trigger_push, allow normal movement so they don't get stuck!
+    if (IsValidEntity(entity) && IsValidEntity(entity2)) {
+        if (entity > 0 && entity <= ISDM_MaxPlayers && IsPlayerAlive(entity)) {
+            PrintToChat(entity, "You're in a trigger_push");
+            AllowNormalGravity[entity] = true;
+        }
+
+        if (entity2 > 0 && entity2 <= ISDM_MaxPlayers && IsPlayerAlive(entity2)) {
+            PrintToChat(entity2, "You're in a trigger_push");
+            AllowNormalGravity[entity2] = true;
+        }
+    } 
+}
+
+public Action:ISDM_TriggerLeave(entity, entity2) { // Player is not being pushed by a trigger_push anymore, return to normal skate movement
+    if (IsValidEntity(entity) && IsValidEntity(entity2)) {
+        if (entity2 > 0 && entity2 <= ISDM_MaxPlayers) {   
+            CreateTimer(1.0, ISDM_CheckPlysNearTriggers, entity2, TIMER_REPEAT);
+        }
+    }
+}
+     
 
 public Action:GetClosestPlyToProj(Handle:timer, any:entity) { // Calculates the closest player to the projectile entity, assumes this is the owner.
     if (IsValidEntity(entity)) {
@@ -1157,3 +1225,4 @@ public Action:GetClosestPlyToProj(Handle:timer, any:entity) { // Calculates the 
         } 
     }
 }
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
