@@ -5,11 +5,10 @@
 // 5. Detect map size, change speeds accordingly 
 // (Could maybe use an entity distance checking function to determine distance in the map?)
 // (Could maybe make a line trace for every prop calculating the max playable height?) (Bigger height = Bigger map)
-// 7. Make gravity system compatible with map lifts (Maybe check if player is in a trigger_push entity?)(Hook trigger brushes from OnStartTouch?)
 // 8. Fix gun noises from cutting off from the fast firing code
 // 9. Fix swimming being completely broken and not working
 // 10. Make DMG_FALL removal compatible with stuff like trigger_hurt entities
-// 11. Add perk player colors
+// 11. Add perk player model colors
 
 public Plugin:myinfo =
 {
@@ -69,6 +68,7 @@ new Handle:TimeForSkateSound[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:NearbyEntSearch[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:PushData[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:DistData[MAXPLAYERS + 1] = INVALID_HANDLE;
+new Handle:CheckingForTriggers[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ForceReloading[MAXPLAYERS + 1] = false;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
@@ -143,6 +143,14 @@ new ISDM_Perks[Perks];
 new ISDM_PerkVars[PerkConVars];
 
 public void OnMapStart() { // OnPluginStart() does NOT run every map change resulting in file downloads never taking place!
+    ISDM_Initialize();
+}
+
+public void OnPluginStart() { // OnMapStart() will not be called by just simply reloading the plugin
+    ISDM_Initialize();
+}
+
+public void ISDM_Initialize() {
     ISDM_MaxPlayers = GetMaxClients(); 
     SetConVarInt(FindConVar("sv_footsteps"), 0, false, false); // Footstep sounds are replaced with skating sounds
     SetConVarFloat(FindConVar("sv_friction"), 0.5, false, false); // No other way found so far to allow players to slide :(
@@ -186,6 +194,17 @@ public void OnMapStart() { // OnPluginStart() does NOT run every map change resu
     new const PerkIncrement[6] = {ISDM_NoPerks, ISDM_SlowPerk, ISDM_AirPerk, ISDM_SpeedPerk1, ISDM_SpeedPerk2, ISDM_SpeedPerk3};
     for (new i = 0; i < sizeof(PerkIncrement); i++) { // Loop through each perk and assign it to an array
         ISDM_Perks[PerkIncrement[i]] = CreateArray(32);
+    }
+
+    for (new i = 0; i < GetMaxEntities(); i++) { // Loop through each trigger and add the hooks
+        if (IsValidEntity(i)) {
+            new String:EntClass[32];
+            GetEntityClassname(i, EntClass, 32);
+            if (strcmp(EntClass, "trigger_push") == 0) { // Hook trigger_push entities for collision detection
+                SDKHook(i, SDKHook_StartTouch, ISDM_TriggerTouch);
+                SDKHook(i, SDKHook_EndTouchPost, ISDM_TriggerLeave);
+            }
+        }
     }
 }
 
@@ -1154,26 +1173,15 @@ public bool:IDM_NearTriggers(any:client) { // Loops through all trigger_brush en
 }
 
 public Action:ISDM_CheckPlysNearTriggers(Handle:timer, any:entity) { // A looping timer to make sure the player never breaks out of the gravity system
-    //for (new i = 0; i <= ISDM_MaxPlayers; i++) {
-        //if (DistData[client] != INVALID_HANDLE) { 
-        if (!IDM_NearTriggers(entity)) {
-            AllowNormalGravity[entity] = false; // They are not near a trigger anymore, so resume gravity system for them
-            PrintToChat(entity, "You're no longer in a trigger_push");  
-            KillTimer(timer); // Stop looping
-        }
-        //}
-    //}
+    if (!IDM_NearTriggers(entity)) {
+        AllowNormalGravity[entity] = false; // They are not near a trigger anymore, so resume gravity system for them 
+        CheckingForTriggers[entity] = INVALID_HANDLE;
+    }
 } 
 
 public Action:ISDM_TriggerTouch(entity, entity2) { // Player is touching a trigger_push, allow normal movement so they don't get stuck!
     if (IsValidEntity(entity) && IsValidEntity(entity2)) {
-        if (entity > 0 && entity <= ISDM_MaxPlayers && IsPlayerAlive(entity)) {
-            PrintToChat(entity, "You're in a trigger_push");
-            AllowNormalGravity[entity] = true;
-        }
-
         if (entity2 > 0 && entity2 <= ISDM_MaxPlayers && IsPlayerAlive(entity2)) {
-            PrintToChat(entity2, "You're in a trigger_push");
             AllowNormalGravity[entity2] = true;
         }
     } 
@@ -1181,8 +1189,10 @@ public Action:ISDM_TriggerTouch(entity, entity2) { // Player is touching a trigg
 
 public Action:ISDM_TriggerLeave(entity, entity2) { // Player is not being pushed by a trigger_push anymore, return to normal skate movement
     if (IsValidEntity(entity) && IsValidEntity(entity2)) {
-        if (entity2 > 0 && entity2 <= ISDM_MaxPlayers) {   
-            CreateTimer(1.0, ISDM_CheckPlysNearTriggers, entity2, TIMER_REPEAT);
+        if (entity2 > 0 && entity2 <= ISDM_MaxPlayers) {  
+            if (CheckingForTriggers[entity2] == INVALID_HANDLE) {
+                CheckingForTriggers[entity2] = CreateTimer(1.0, ISDM_CheckPlysNearTriggers, entity2, TIMER_REPEAT);
+            } 
         }
     }
 }
