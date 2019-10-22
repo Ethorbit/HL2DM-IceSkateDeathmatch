@@ -265,7 +265,25 @@ ISDM_DealDamage(victim, damage, attacker=0, damageType=DMG_GENERIC, String:weapo
 	}
 }
 
+public void ShowAllEnts() {
+    for (new i = 0; i < GetMaxEntities(); i++) {
+        if (IsValidEntity(i)) {
+            new String:EntClass[32];
+            GetEntityClassname(i, EntClass, 32);
+            PrintToServer("%i, which has class %s", i, EntClass);
+        }
+    }
+}
 public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &damagetype) {
+    if (IsValidEntity(inflictor)) {
+        new String:InflictorClass[32];
+        GetEntityClassname(inflictor, InflictorClass, 32);
+
+        if (strcmp(InflictorClass, "trigger_hurt") == 0) { // Make sure to never cancel out damage if it is caused by a trigger_hurt
+            return Plugin_Continue;
+        }
+    }
+
     // Props will be flying crazy in all directions and players will run into them at extreme speeds, so disable PVE prop damage:
     if (damagetype & DMG_CRUSH) { // DMG_CRUSH is prop damage
         damage = 0.0; 
