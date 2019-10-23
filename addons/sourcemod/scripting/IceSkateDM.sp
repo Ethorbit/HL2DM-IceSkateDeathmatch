@@ -6,7 +6,6 @@
 // (Could maybe use an entity distance checking function to determine distance in the map?)
 // (Could maybe make a line trace for every prop calculating the max playable height?) (Bigger height = Bigger map)
 // 8. Fix gun noises from cutting off from the fast firing code
-// 9. Fix swimming being completely broken and not working
 // 11. Add perk player model colors
 
 public Plugin:myinfo =
@@ -45,7 +44,8 @@ new String:ISDM_Materials[][63] = { // The materials the gamemode uses
     "Right/rightandallspeedperks",
     "Right/right1speedperkandair",
     "Right/right2speedperksandair",
-    "Right/rightallspeedperksandair"
+    "Right/rightallspeedperksandair",
+    "transparent"
 }
 
 new String:ISDM_Sounds[][32] = { // Sounds used by the gamemode
@@ -1066,6 +1066,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
         }
     } else { // They are dead or unconnected
         ISDM_ResetPlyStats(client);
+        ISDM_DeleteWaterProp(client);
     }
     
 
