@@ -182,11 +182,17 @@ public void ISDM_Initialize() {
     for (new i = 0; i < sizeof(ISDM_Sounds); i++) { // Loop through sounds and force downloads too
         int MaxMatLength = 32;
         new String:Sounds[MaxMatLength];
-        new String:SoundPrecache[MaxMatLength];
         Format(Sounds, MaxMatLength, "sound/IceSkateDM/%s.wav", ISDM_Sounds[i]);
         AddFileToDownloadsTable(Sounds);
         PrecacheSound(Sounds);
     }
+
+    AddFileToDownloadsTable("models/IceSkateDM/WaterProp.mdl");
+    AddFileToDownloadsTable("models/IceSkateDM/WaterProp.phy");
+    AddFileToDownloadsTable("models/IceSkateDM/WaterProp.dx80.vtx");
+    AddFileToDownloadsTable("models/IceSkateDM/WaterProp.dx90.vtx");
+    AddFileToDownloadsTable("models/IceSkateDM/WaterProp.sw.vtx");
+    AddFileToDownloadsTable("models/IceSkateDM/WaterProp.vvd");
 
     new const perkvar[5] = {SlowPerkSpeedConVar, FastPerk1SpeedConVar, FastPerk2SpeedConVar, FastPerk3SpeedConVar, AirPerkHeightConVar}; 
     for (new i = 0; i < sizeof(perkvar); i++) { // Loop through each perk convar and hook it to the ISDM_PerkChanged() function
@@ -550,11 +556,8 @@ public Action:ISDM_ForceReload(Handle:timer, any:client) { // A timed timer to f
     SetEntPropFloat(PlyWep, Prop_Send, "m_flNextSecondaryAttack", 1.0);
 }
 
-// NEW IDEA!
-// Get the initial player's Z axis position of when they touched the water
-// and lock it from changing values so that the player doesn't ever sink into
-// the water!
-
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////// ISDM PROP STUFF //////////////////////////////////////
 public void ISDM_CreateWaterEnt(client) {
     new String:PropName[32];
     new Float:currentPos[3];
@@ -562,18 +565,18 @@ public void ISDM_CreateWaterEnt(client) {
     Format(PropName, 32, "WaterProp%i", client);
 
     if (!IsValidEntity(ISDM_WaterProp(client))) {
-        new WaterProp = CreateEntityByName("prop_physics");
+        new WaterProp = CreateEntityByName("prop_physics_override");
     
         if (IsValidEntity(WaterProp) && WaterProp != -1) {
             DispatchKeyValue(WaterProp, "spawnflags", "0");
             DispatchKeyValue(WaterProp, "targetname", PropName);
-            DispatchKeyValue(WaterProp, "model", "models/props_c17/fence01b.mdl");
+            DispatchKeyValue(WaterProp, "model", "models/IceSkateDM/WaterProp.mdl");
+            DispatchKeyValueFloat(WaterProp, "rendermode", 10.0);
             DispatchKeyValueFloat(WaterProp, "surfaceprop", 45.0);
             DispatchKeyValueFloat(WaterProp, "solid", 2.0);
             DispatchKeyValueFloat(WaterProp, "scale", 4.0);
             DispatchSpawn(WaterProp);
             SetEntityMoveType(WaterProp, MOVETYPE_NONE);
-            PrintToServer("OK! Created new water prop entity %i", WaterSurfaceProp[client]);
         } 
     }
 }
@@ -627,6 +630,7 @@ public ISDM_HitWorld(client) { // This trace will ensure that the 'Water Prop' i
 
     return hitPos[2];
 }
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], float angles[3]) {
     new String:WepClass[32];
@@ -646,22 +650,14 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
 
     if (!IsValidEntity(ISDM_WaterProp(client)) || ISDM_WaterProp(client) == 0) { // If the prop doesn't exist
         ISDM_CreateWaterEnt(client);
-    } else {
-        new String:FuckingClass[32];
-        GetEntityClassname(ISDM_WaterProp(client), FuckingClass, 32);
-        PrintToServer("So apparently the water prop: %i exists already %s", ISDM_WaterProp(client), FuckingClass);
-    }
+    } 
 
     new Float:PlyEyes[3];
     GetClientEyePosition(client, PlyEyes);
-
     new Handle:TraceWater = TR_TraceRayFilterEx(PlyEyes, {90.0, 0.0, 0.0}, MASK_WATER, RayType_Infinite, TraceEntityFilterPlayer);
     
-    if (GetEntityRenderMode(ISDM_WaterProp(client)) != RENDER_NONE) {
-        SetEntityRenderMode(ISDM_WaterProp(client), RENDER_NONE);
-    }
-
-    if (TR_DidHit(TraceWater)) {
+    // Make an invisible prop under a player if the line trace hits water below the player so that it seems they are sliding on ice:
+    if (TR_DidHit(TraceWater)) { 
         new Float:WaterEndPos[3];
         new Float:DistFromWater = 0.0;
 
@@ -692,9 +688,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                     WaterPos[0] = currentPos[0];
                     WaterPos[1] = currentPos[1];
                     WaterPos[2] = WaterEndPos[2];
-                    PrintToChat(client, "The player's Z axis: %f The water's Z axis: %f", currentPos[2], WaterEndPos[2]);
                     TeleportEntity(ISDM_WaterProp(client), WaterPos, {90.0, 0.0, 0.0}, NULL_VECTOR);
-                    //PrintToChat(client, "%f %f %f", WaterPos[0], WaterPos[1], WaterPos[2]);  
                 } else {
                     ISDM_DeleteWaterProp(client);
                     PlyOnWaterProp[client] = false;
@@ -703,7 +697,9 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 ISDM_DeleteWaterProp(client);
                 PlyOnWaterProp[client] = false;
             } 
-        } else {
+        }  
+        
+        if (GetVectorDistance(WatPos, GroundPos) < 20.0 && GetVectorDistance(WatPos, GroundPos) > 2.0) {
             ISDM_DeleteWaterProp(client);
             PlyOnWaterProp[client] = false;
         }

@@ -1,0 +1,6 @@
+"VertexLitGeneric"
+{
+	"$basetexture" "iceskatedm/transparent"
+	"$surfaceprop" "ice"
+	"$translucent" "1"
+}
