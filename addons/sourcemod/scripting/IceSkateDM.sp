@@ -1,7 +1,6 @@
 // Ice Skate Deathmatch is a thing now thanks to Himanshu's choice of commands :)
 // TODO: 
 // 2. Add gamemode info somehow 
-// 3. Fix players from both getting kills with the bull 
 // 5. Detect map size, change speeds accordingly 
 // (Could maybe use an entity distance checking function to determine distance in the map?)
 // (Could maybe make a line trace for every prop calculating the max playable height?) (Bigger height = Bigger map)
@@ -13,7 +12,7 @@ public Plugin:myinfo =
 	name = "Ice Skate Deathmatch",
 	author = "Ethorbit",
 	description = "Greatly changes the way deathmatch is played introducing new techniques & perks",
-	version = "1.3.3",
+	version = "1.3.6",
 	url = ""
 }
 
@@ -68,7 +67,6 @@ new Handle:NearbyEntSearch[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:PushData[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:CheckingForTriggers[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ForceReloading[MAXPLAYERS + 1] = false;
-int WaterSurfaceProp[MAXPLAYERS + 1] = -1;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
 new Float:PlySkates[MAXPLAYERS + 1] = 0.0;
@@ -80,6 +78,7 @@ bool DeniedSprintSoundPlayed[MAXPLAYERS + 1] = false;
 bool PlayerIsBoosting[MAXPLAYERS + 1] = false;
 bool AllowNormalGravity[MAXPLAYERS + 1] = false;
 bool PlyOnWaterProp[MAXPLAYERS + 1] = false;
+bool PlyTouchingWaterProp[MAXPLAYERS + 1] = false;
 new Float:MAXSLOWSPEED;
 new Float:MAXAIRHEIGHT;
 new Float:SPEED1SPEED;
@@ -115,7 +114,7 @@ public ISDM_ResetPlyStats(client) {
     PlayerIsBoosting[client] = false;
     AllowNormalGravity[client] = false;
     PlyOnWaterProp[client] = false;
-    WaterSurfaceProp[client] = -1;
+    PlyTouchingWaterProp[client] = false;
 }
 
 public OnClientDisconnect_Post(client) { // When a player leaves it is important to reset the client index's statistics
@@ -380,13 +379,33 @@ public Action:ISDM_Touched(entity, entity2) {
 
         if (strcmp(EntClass, "player") == 0 && strcmp(EntClass2, "player") == 0) { // If both entities are players
             if (entity != entity2) { // They are different players
-                if (ISDM_GetPerk(entity, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(entity, ISDM_Perks[ISDM_SpeedPerk3])) {
-                    ISDM_DealDamage(entity2, 1000, entity, DMG_BULLET, "");
-                }
+            
+                // If both of them have the speed perk:
+                if (ISDM_GetPerk(entity2, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(entity2, ISDM_Perks[ISDM_SpeedPerk3]) && ISDM_GetPerk(entity, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(entity, ISDM_Perks[ISDM_SpeedPerk3])) {
+                    int EntityTarget = GetClientAimTarget(entity, true);
+                    int EntityTarget2 = GetClientAimTarget(entity2, true);
 
-                if (ISDM_GetPerk(entity2, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(entity2, ISDM_Perks[ISDM_SpeedPerk3])) {
-                    ISDM_DealDamage(entity, 1000, entity2, DMG_BULLET, "");
+                    if (EntityTarget == entity2) {
+                        ISDM_DealDamage(entity2, 1000, entity, DMG_BULLET, "");
+                    }
+
+                    if (EntityTarget2 == entity) {
+                        ISDM_DealDamage(entity, 1000, entity2, DMG_BULLET, "");
+                    }        
+                } else { // If only one of the two have the bull perk
+                    if (ISDM_GetPerk(entity, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(entity, ISDM_Perks[ISDM_SpeedPerk3])) {
+                        ISDM_DealDamage(entity2, 1000, entity, DMG_BULLET, "");
+                    }
                 }
+            }
+        } else if (strcmp(EntClass, "player") == 0) { // They are both not players
+            new String:Targetname[32];
+            GetEntPropString(entity2, Prop_Data, "m_iName", Targetname, 32);
+
+            if (StrContains(Targetname, "WaterProp") == 0) { // Player is touching a water prop, which means they are sliding on water
+                PlyTouchingWaterProp[entity] = true;
+            } else {
+                PlyTouchingWaterProp[entity] = false;
             }
         }
     }
@@ -463,42 +482,46 @@ public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:data) {
         GetClientAbsOrigin(client, clientOrigin);
 
         for (new i = 0; i < GetMaxEntities(); i++) {
-            if (IsValidEntity(i) && IsValidEntity(client) && IsPlayerAlive(client) && IsClientConnected(client)) {
-                new String:EntClass[32];
-                GetEntityClassname(i, EntClass, 32);    
-                if (StrContains(EntClass, "prop_physics") == 0) {
-                    new Float:propOrigin[3];
-                    GetEntPropVector(i, Prop_Data, "m_vecOrigin", propOrigin);
-                    
-                    if (ISDM_EntVisible(client, i)) { // If the player can see the entity
-                        if (GetEntProp(i, Prop_Data, "m_bThrownByPlayer") == 0) { // Make sure this prop was never thrown by anyone 
-                            new Float:propSpeed[3];
-                            new Float:plySpeed[3]; 
-                            GetEntPropVector(client, Prop_Data, "m_vecVelocity", plySpeed); 
-                            GetEntPropVector(i, Prop_Data, "m_vecVelocity", propSpeed);    
+            if (IsValidEntity(i) && IsValidEntity(client) && IsPlayerAlive(client) && IsClientConnected(client)) {        
+                new String:Targetname[32];
+                GetEntPropString(i, Prop_Data, "m_iName", Targetname, 32);
+                if (StrContains(Targetname, "WaterProp") != 0) { // 'Water Props' are props that let players slide on water, DO NOT lift these!
+                    new String:EntClass[32];
+                    GetEntityClassname(i, EntClass, 32);   
+                    if (StrContains(EntClass, "prop_physics") == 0) { 
+                        new Float:propOrigin[3];
+                        GetEntPropVector(i, Prop_Data, "m_vecOrigin", propOrigin);
+                        
+                        if (ISDM_EntVisible(client, i)) { // If the player can see the entity
+                            if (GetEntProp(i, Prop_Data, "m_bThrownByPlayer") == 0) { // Make sure this prop was never thrown by anyone 
+                                new Float:propSpeed[3];
+                                new Float:plySpeed[3]; 
+                                GetEntPropVector(client, Prop_Data, "m_vecVelocity", plySpeed); 
+                                GetEntPropVector(i, Prop_Data, "m_vecVelocity", propSpeed);    
 
-                            if (GetVectorDistance(propOrigin, clientOrigin) < PropDist) { // If the prop is too close to the player
-                                // Player is on the ground or is low above the ground:
-                                if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") != -1 || PlyDistAboveGround[client] < 400.0) { 
-                                    if (propSpeed[0] == 0.0 && propSpeed[1] == 0.0) { // And the prop has no speed
-                                        if (GetEntPropEnt(i, Prop_Data, "m_hPhysicsAttacker") == -1) { // If no one has picked this up with the gravity gun               
-                                            // 64th spawn flag means motion will enable on physcannon grab:
-                                            if (GetEntProp(i, Prop_Data, "m_spawnflags") & 64) { 
-                                                AcceptEntityInput(i, "EnableMotion"); // Enable the motion anyways
+                                if (GetVectorDistance(propOrigin, clientOrigin) < PropDist) { // If the prop is too close to the player
+                                    // Player is on the ground or is low above the ground:
+                                    if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") != -1 || PlyDistAboveGround[client] < 400.0) { 
+                                        if (propSpeed[0] == 0.0 && propSpeed[1] == 0.0) { // And the prop has no speed
+                                            if (GetEntPropEnt(i, Prop_Data, "m_hPhysicsAttacker") == -1) { // If no one has picked this up with the gravity gun               
+                                                // 64th spawn flag means motion will enable on physcannon grab:
+                                                if (GetEntProp(i, Prop_Data, "m_spawnflags") & 64) { 
+                                                    AcceptEntityInput(i, "EnableMotion"); // Enable the motion anyways
+                                                }
+
+                                                // Launch the prop in the air with higher Z velocity than the player:
+                                                propSpeed[0] = 0.0;
+                                                propSpeed[1] = 0.0;
+                                                propSpeed[2] = plySpeed[2] + GetRandomFloat(450.0, 600.0);
+                                                TeleportEntity(i, NULL_VECTOR, NULL_VECTOR, propSpeed);
+                                            } else { // The prop has been thrown before
+                                                CreateTimer(3.0, ISDM_FixProps, i); // Fix physics attacker never resetting after impact
                                             }
-
-                                            // Launch the prop in the air with higher Z velocity than the player:
-                                            propSpeed[0] = 0.0;
-                                            propSpeed[1] = 0.0;
-                                            propSpeed[2] = plySpeed[2] + GetRandomFloat(450.0, 600.0);
-                                            TeleportEntity(i, NULL_VECTOR, NULL_VECTOR, propSpeed);
-                                        } else { // The prop has been thrown before
-                                            CreateTimer(3.0, ISDM_FixProps, i); // Fix physics attacker never resetting after impact
                                         }
                                     }
-                                }
-                            }     
-                        }         
+                                }     
+                            }         
+                        }
                     }
                 }
             }
@@ -646,8 +669,6 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
 
     GetClientAbsOrigin(client, currentPos);
 
-    int WaterLvl = GetEntProp(client, Prop_Data, "m_nWaterLevel");
-
     if (!IsValidEntity(ISDM_WaterProp(client)) || ISDM_WaterProp(client) == 0) { // If the prop doesn't exist
         ISDM_CreateWaterEnt(client);
     } 
@@ -735,20 +756,24 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             bool SpeedPerk1Enabled = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk1]) || ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3]));
             bool SpeedPerk2Enabled = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3]));
 
-            if (WaterLvl > 0 && SpeedPerk1Enabled || SpeedPerk2Enabled) { // Slow down when they are in the water
-                if (currentSpeed[0] > 115 || currentSpeed[1] > 115) {
-                    currentSpeed[0] -= 115;
-                    currentSpeed[1] -= 115;  
-                    currentSpeed[2] -= 5;
-                } 
+            int WaterLvl = GetEntProp(client, Prop_Data, "m_nWaterLevel");
+            if (WaterLvl != 0) {
+                if (SpeedPerk1Enabled || SpeedPerk2Enabled) { // Slow down when they are in the water
+                    PrintToChat(client, "You are in water?! %i", WaterLvl);
+                    if (currentSpeed[0] > 55 || currentSpeed[1] > 55) {
+                        currentSpeed[0] -= 55;
+                        currentSpeed[1] -= 55;  
+                        currentSpeed[2] -= 5;
+                    } 
 
-                if (currentSpeed[0] < -115 || currentSpeed[1] < -115) {
-                    currentSpeed[0] += 115;
-                    currentSpeed[1] += 115;  
-                    currentSpeed[2] -= 5;
+                    if (currentSpeed[0] < -55 || currentSpeed[1] < -55) {
+                        currentSpeed[0] += 55;
+                        currentSpeed[1] += 55;  
+                        currentSpeed[2] -= 5;
+                    }
+                        
+                    TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, currentSpeed);
                 }
-                      
-                TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, currentSpeed);
             }
 
             if (NotFast && !IsHigh) { // Display no perks if the user has no perks active
@@ -1126,14 +1151,24 @@ public ISDM_SkateSound(client) { // Plays a random ice skate sound for skating p
 public Action:ISDM_IncrementSkate(Handle:timer, any:client) {
     if (IsValidEntity(client)) {   
         if (GetClientButtons(client) & 1 << 9 && GetClientButtons(client) & 1 << 10 ) {
-        } else {
+        } else if (PlyTouchingWaterProp[client] == false) { 
+            PrintToChat(client, "not on water");       
             if (PlySkates[client] < 8) { // Give them an easy chance to skate fast
                 PlySkates[client] = PlySkates[client] + 2;
             } else if (PlySkates[client] < 20) {
                 PlySkates[client]++; // They are pretty fast now, start adding normal speed boosts
             } else {
                 PlySkates[client] = PlySkates[client] + 0.5; // They are going super fast, add smaller speed boosts
-            }
+            }   
+        } else if (PlyTouchingWaterProp[client] == true) { // They are sliding on water, make them skate slightly faster
+            PrintToChat(client, "on water");  
+            if (PlySkates[client] < 8) { // Give them an easy chance to skate fast
+                PlySkates[client] = PlySkates[client] + 4;
+            } else if (PlySkates[client] < 20) {
+                PlySkates[client] = PlySkates[client] + 2; // They are pretty fast now, start adding normal speed boosts
+            } else {
+                PlySkates[client] = PlySkates[client]++; // They are going super fast, add smaller speed boosts
+            } 
         }
     }
 }
