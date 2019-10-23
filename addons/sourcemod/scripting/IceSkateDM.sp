@@ -7,7 +7,6 @@
 // (Could maybe make a line trace for every prop calculating the max playable height?) (Bigger height = Bigger map)
 // 8. Fix gun noises from cutting off from the fast firing code
 // 9. Fix swimming being completely broken and not working
-// 10. Make DMG_FALL removal compatible with stuff like trigger_hurt entities
 // 11. Add perk player model colors
 
 public Plugin:myinfo =
@@ -15,7 +14,7 @@ public Plugin:myinfo =
 	name = "Ice Skate Deathmatch",
 	author = "Ethorbit",
 	description = "Greatly changes the way deathmatch is played introducing new techniques & perks",
-	version = "1.3.0",
+	version = "1.3.3",
 	url = ""
 }
 
@@ -69,6 +68,7 @@ new Handle:NearbyEntSearch[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:PushData[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:CheckingForTriggers[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ForceReloading[MAXPLAYERS + 1] = false;
+int WaterSurfaceProp[MAXPLAYERS + 1] = -1;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
 new Float:PlySkates[MAXPLAYERS + 1] = 0.0;
@@ -79,6 +79,7 @@ bool SkatedRight[MAXPLAYERS + 1] = false;
 bool DeniedSprintSoundPlayed[MAXPLAYERS + 1] = false;
 bool PlayerIsBoosting[MAXPLAYERS + 1] = false;
 bool AllowNormalGravity[MAXPLAYERS + 1] = false;
+bool PlyOnWaterProp[MAXPLAYERS + 1] = false;
 new Float:MAXSLOWSPEED;
 new Float:MAXAIRHEIGHT;
 new Float:SPEED1SPEED;
@@ -113,6 +114,8 @@ public ISDM_ResetPlyStats(client) {
     DeniedSprintSoundPlayed[client] = false;
     PlayerIsBoosting[client] = false;
     AllowNormalGravity[client] = false;
+    PlyOnWaterProp[client] = false;
+    WaterSurfaceProp[client] = -1;
 }
 
 public OnClientDisconnect_Post(client) { // When a player leaves it is important to reset the client index's statistics
@@ -236,6 +239,7 @@ public OnGameFrame() {
     }
 }
 
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// ISDM DAMAGE LOGIC /////////////////////////////////
 ISDM_DealDamage(victim, damage, attacker=0, damageType=DMG_GENERIC, String:weapon[]="") {
@@ -275,12 +279,13 @@ public void ShowAllEnts() {
     }
 }
 public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &damagetype) {
-    if (IsValidEntity(inflictor)) {
+    // Allow trigger_hurt entities to still kill players regardless of the conditions set later on:
+    if (IsValidEntity(inflictor)) { 
         new String:InflictorClass[32];
         GetEntityClassname(inflictor, InflictorClass, 32);
 
-        if (strcmp(InflictorClass, "trigger_hurt") == 0) { // Make sure to never cancel out damage if it is caused by a trigger_hurt
-            return Plugin_Continue;
+        if (strcmp(InflictorClass, "trigger_hurt") == 0) { 
+            return Plugin_Continue; // Make sure to never cancel out damage if it is caused by a trigger_hurt
         }
     }
 
@@ -545,6 +550,84 @@ public Action:ISDM_ForceReload(Handle:timer, any:client) { // A timed timer to f
     SetEntPropFloat(PlyWep, Prop_Send, "m_flNextSecondaryAttack", 1.0);
 }
 
+// NEW IDEA!
+// Get the initial player's Z axis position of when they touched the water
+// and lock it from changing values so that the player doesn't ever sink into
+// the water!
+
+public void ISDM_CreateWaterEnt(client) {
+    new String:PropName[32];
+    new Float:currentPos[3];
+    GetClientAbsOrigin(client, currentPos);
+    Format(PropName, 32, "WaterProp%i", client);
+
+    if (!IsValidEntity(ISDM_WaterProp(client))) {
+        new WaterProp = CreateEntityByName("prop_physics");
+    
+        if (IsValidEntity(WaterProp) && WaterProp != -1) {
+            DispatchKeyValue(WaterProp, "spawnflags", "0");
+            DispatchKeyValue(WaterProp, "targetname", PropName);
+            DispatchKeyValue(WaterProp, "model", "models/props_c17/fence01b.mdl");
+            DispatchKeyValueFloat(WaterProp, "surfaceprop", 45.0);
+            DispatchKeyValueFloat(WaterProp, "solid", 2.0);
+            DispatchKeyValueFloat(WaterProp, "scale", 4.0);
+            DispatchSpawn(WaterProp);
+            SetEntityMoveType(WaterProp, MOVETYPE_NONE);
+            PrintToServer("OK! Created new water prop entity %i", WaterSurfaceProp[client]);
+        } 
+    }
+}
+
+// Finds the water prop by its targetname:
+public ISDM_WaterProp(client) { 
+    int WaterProp = -1;
+    
+    for (new i = 0; i <= GetMaxEntities(); i++) {
+        if (IsValidEntity(i)) {
+            new String:Targetname[32];
+            new String:NameFind[32];
+            Format(NameFind, 32, "WaterProp%i", client);
+            GetEntPropString(i, Prop_Data, "m_iName", Targetname, 32);
+            if (strcmp(Targetname, NameFind) == 0) {
+                WaterProp = i;
+                break;
+            }
+        }
+    }
+
+    return WaterProp;
+}
+
+public void ISDM_DeleteWaterProp(client) {
+    for (new i = 0; i <= GetMaxEntities(); i++) {
+        if (IsValidEntity(i)) {
+            new String:Targetname[32];
+            new String:NameFind[32];
+            Format(NameFind, 32, "WaterProp%i", client);
+            GetEntPropString(i, Prop_Data, "m_iName", Targetname, 32);
+            if (strcmp(Targetname, NameFind) == 0) {
+                RemoveEntity(i);
+            }
+        }
+    }
+}
+
+public ISDM_HitWorld(client) { // This trace will ensure that the 'Water Prop' isn't attached below the player when they aren't even above water
+    new Float:hitPos[3] = {0.0, 0.0, 0.0};
+
+    new Float:EyePos[3];
+    GetClientEyePosition(client, EyePos);
+    new Handle:TraceGround = TR_TraceRayFilterEx(EyePos, {90.0, 0.0, 0.0}, MASK_SHOT, RayType_Infinite, TraceEntityFilterPlayer);
+
+    if (TR_DidHit(TraceGround)) {
+        TR_GetEndPosition(hitPos, TraceGround);
+    }
+
+    CloseHandle(TraceGround);
+
+    return hitPos[2];
+}
+
 public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], float angles[3]) {
     new String:WepClass[32];
     new Float:currentPos[3];
@@ -552,13 +635,82 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
     int Viewmodel = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
     bool IsReloading = false;
 
-
     if (IsValidEntity(PlyWep)) {
         GetEntityClassname(PlyWep, WepClass, 32);
         IsReloading = GetEntProp(PlyWep, Prop_Data, "m_bInReload");
     }
 
     GetClientAbsOrigin(client, currentPos);
+
+    int WaterLvl = GetEntProp(client, Prop_Data, "m_nWaterLevel");
+
+    if (!IsValidEntity(ISDM_WaterProp(client)) || ISDM_WaterProp(client) == 0) { // If the prop doesn't exist
+        ISDM_CreateWaterEnt(client);
+    } else {
+        new String:FuckingClass[32];
+        GetEntityClassname(ISDM_WaterProp(client), FuckingClass, 32);
+        PrintToServer("So apparently the water prop: %i exists already %s", ISDM_WaterProp(client), FuckingClass);
+    }
+
+    new Float:PlyEyes[3];
+    GetClientEyePosition(client, PlyEyes);
+
+    new Handle:TraceWater = TR_TraceRayFilterEx(PlyEyes, {90.0, 0.0, 0.0}, MASK_WATER, RayType_Infinite, TraceEntityFilterPlayer);
+    
+    if (GetEntityRenderMode(ISDM_WaterProp(client)) != RENDER_NONE) {
+        SetEntityRenderMode(ISDM_WaterProp(client), RENDER_NONE);
+    }
+
+    if (TR_DidHit(TraceWater)) {
+        new Float:WaterEndPos[3];
+        new Float:DistFromWater = 0.0;
+
+        TR_GetEndPosition(WaterEndPos, TraceWater);
+        new Float:GroundPos[3];
+        new Float:WatPos[3];
+        GroundPos[0] = 0.0;
+        GroundPos[1] = 0.0;
+        GroundPos[2] = ISDM_HitWorld(client);
+        WatPos[0] = 0.0;
+        WatPos[1] = 0.0;
+        WatPos[2] = WaterEndPos[2];
+
+        if (GetVectorDistance(WatPos, GroundPos) > 20.0) {
+            DistFromWater = GetVectorDistance(currentPos, WaterEndPos);
+            if (DistFromWater < 100.0) {
+                if (IsValidEntity(ISDM_WaterProp(client)) && ISDM_WaterProp(client) > 0) { // If the prop exists
+                    if (PlyOnWaterProp[client] == false) {
+                        new Float:PlyUp[3];
+                        PlyUp[0] = currentPos[0];
+                        PlyUp[1] = currentPos[1];
+                        PlyUp[2] = currentPos[2] + 40.0;
+                        TeleportEntity(client, PlyUp, NULL_VECTOR, NULL_VECTOR);
+                        PlyOnWaterProp[client] = true;
+                    }
+
+                    new Float:WaterPos[3];
+                    WaterPos[0] = currentPos[0];
+                    WaterPos[1] = currentPos[1];
+                    WaterPos[2] = WaterEndPos[2];
+                    PrintToChat(client, "The player's Z axis: %f The water's Z axis: %f", currentPos[2], WaterEndPos[2]);
+                    TeleportEntity(ISDM_WaterProp(client), WaterPos, {90.0, 0.0, 0.0}, NULL_VECTOR);
+                    //PrintToChat(client, "%f %f %f", WaterPos[0], WaterPos[1], WaterPos[2]);  
+                } else {
+                    ISDM_DeleteWaterProp(client);
+                    PlyOnWaterProp[client] = false;
+                }
+            } else {
+                ISDM_DeleteWaterProp(client);
+                PlyOnWaterProp[client] = false;
+            } 
+        } else {
+            ISDM_DeleteWaterProp(client);
+            PlyOnWaterProp[client] = false;
+        }
+    }
+
+    CloseHandle(TraceWater);
+
 
     if (GetEntityMoveType(client) != MOVETYPE_NOCLIP) { // Make sure noclipping players don't skate or get perks, that could be annoying for admins
         if (IsClientConnected(client) && IsPlayerAlive(client)) {
@@ -587,6 +739,22 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             bool SpeedPerk1Enabled = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk1]) || ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3]));
             bool SpeedPerk2Enabled = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]) || ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3]));
 
+            if (WaterLvl > 0 && SpeedPerk1Enabled || SpeedPerk2Enabled) { // Slow down when they are in the water
+                if (currentSpeed[0] > 115 || currentSpeed[1] > 115) {
+                    currentSpeed[0] -= 115;
+                    currentSpeed[1] -= 115;  
+                    currentSpeed[2] -= 5;
+                } 
+
+                if (currentSpeed[0] < -115 || currentSpeed[1] < -115) {
+                    currentSpeed[0] += 115;
+                    currentSpeed[1] += 115;  
+                    currentSpeed[2] -= 5;
+                }
+                      
+                TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, currentSpeed);
+            }
+
             if (NotFast && !IsHigh) { // Display no perks if the user has no perks active
                 ISDM_AddPerk(client, ISDM_Perks[ISDM_NoPerks]);
             } else {
@@ -601,7 +769,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 GetClientAbsOrigin(client, plyPos);     
                 new Handle:TraceZ = TR_TraceRayFilterEx(plyPos, {90.0, 0.0, 0.0}, MASK_PLAYERSOLID, RayType_Infinite, TraceEntityFilterPlayer);
 
-                if (AllowNormalGravity[client] == false) { // Allow normal gravity if they are in a trigger_push entity
+                if (AllowNormalGravity[client] == false) { // Allow normal gravity if they are in a trigger_push entity or are swimming
                     if (PlayerIsBoosting[client] == false) { // Only change their gravity if they aren't boosting themselves
                         if (TR_DidHit(TraceZ)) { // Kinda useless since it will always hit, but better safe than sorry
                             TR_GetEndPosition(ThingBelowPly, TraceZ);          
@@ -648,7 +816,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                             SetEntPropFloat(Viewmodel, Prop_Data, "m_flPlaybackRate", 1.0);
                             ForceReloading[client] = INVALID_HANDLE;
                         } 
-                    }
+                    } 
                 }  
             }
     /////////////////////////////////////////////////////////////////////////////
@@ -820,9 +988,9 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 //SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
             }
 
-            if (buttons & IN_JUMP) { 
+            if (buttons & IN_JUMP) {
                 buttons &= ~IN_JUMP;
-                return Plugin_Continue; 
+                return Plugin_Continue;        
             } 
 
             bool ValidSkateLeft = SkatedRight[client] && !SkatedLeft[client];
@@ -876,7 +1044,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                         AddPlySkate[client] = INVALID_HANDLE;
                     }
                 }
-
+       
                 if (buttons & IN_MOVELEFT || buttons & IN_MOVERIGHT) { // Player is skating                      
                     if (PlySkates[client] > 0) {
                         float direction[3];
@@ -900,7 +1068,10 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 }             
             } 
         }
+    } else { // They are dead or unconnected
+        ISDM_ResetPlyStats(client);
     }
+    
 
     return Plugin_Continue;
 }
@@ -939,7 +1110,7 @@ public ISDM_ImpactSound(client) { // Replaces the fall damage sound with the new
     int RandomIndex = GetRandomInt(0, 1); 
     Format(SoundName, sizeof(SoundName), "IceSkateDM/%s", RandomImpact[RandomIndex]); // Randomly chooses between impact01 and impact02
     PrecacheSound(SoundName);
-    EmitSoundToAll(SoundName, client, CHAN_AUTO, SNDLVL_NORM, _, 1.0, _, _, _, _, _, _); // Plays the ice impact sound
+    EmitSoundToAll(SoundName, client, CHAN_AUTO, SNDLVL_NORM, _, 1.0, _, _, _, _, _, _); // Plays the ice impact sound 
 }
 
 public ISDM_SkateSound(client) { // Plays a random ice skate sound for skating players
@@ -951,7 +1122,7 @@ public ISDM_SkateSound(client) { // Plays a random ice skate sound for skating p
         TimeForSkateSound[client] = CreateTimer(0.50, ISDM_DoNothing);
         PrecacheSound(SoundName);
         EmitSoundToAll(SoundName, client, CHAN_AUTO, SNDLVL_NORM, _, 0.40, _, _, _, _, _, _); // Plays the ice skate sound
-    }
+    }  
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////// ISDM SKATE LOGIC //////////////////////////////////
