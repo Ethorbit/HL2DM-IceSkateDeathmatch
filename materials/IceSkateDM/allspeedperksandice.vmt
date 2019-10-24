@@ -1,0 +1,6 @@
+"UnlitGeneric"
+{
+	"$basetexture" "iceskatedm/allspeedperksandice"
+	"$translucent" "1"
+	"$selfillum" "1"
+}

@@ -28,6 +28,10 @@ new String:ISDM_Materials[][63] = { // The materials the gamemode uses
     "allspeedperks",
     "allspeedperksandair",
     "airperk",
+    "iceperk",
+    "1speedperkandice",
+    "2speedperksandice",
+    "allspeedperksandice",
     "Left/leftarrow",
     "Left/leftandairperk",
     "Left/leftand1speedperk",
@@ -36,6 +40,10 @@ new String:ISDM_Materials[][63] = { // The materials the gamemode uses
     "Left/left1speedperkandair",
     "Left/left2speedperksandair",
     "Left/leftallspeedperksandair",
+    "Left/leftandice",
+    "Left/left1speedperkandice",
+    "Left/left2speedperksandice",
+    "Left/leftallspeedperksandice",
     "Right/rightarrow",
     "Right/rightandairperk",
     "Right/rightand1speedperk",
@@ -44,6 +52,10 @@ new String:ISDM_Materials[][63] = { // The materials the gamemode uses
     "Right/right1speedperkandair",
     "Right/right2speedperksandair",
     "Right/rightallspeedperksandair",
+    "Right/rightandice",
+    "Right/right1speedperkandice",
+    "Right/right2speedperksandice",
+    "Right/rightallspeedperksandice",
     "transparent"
 }
 
@@ -279,7 +291,6 @@ public void ShowAllEnts() {
         if (IsValidEntity(i)) {
             new String:EntClass[32];
             GetEntityClassname(i, EntClass, 32);
-            PrintToServer("%i, which has class %s", i, EntClass);
         }
     }
 }
@@ -759,7 +770,6 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             int WaterLvl = GetEntProp(client, Prop_Data, "m_nWaterLevel");
             if (WaterLvl != 0) {
                 if (SpeedPerk1Enabled || SpeedPerk2Enabled) { // Slow down when they are in the water
-                    PrintToChat(client, "You are in water?! %i", WaterLvl);
                     if (currentSpeed[0] > 55 || currentSpeed[1] > 55) {
                         currentSpeed[0] -= 55;
                         currentSpeed[1] -= 55;  
@@ -790,37 +800,41 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                 GetClientAbsOrigin(client, plyPos);     
                 new Handle:TraceZ = TR_TraceRayFilterEx(plyPos, {90.0, 0.0, 0.0}, MASK_PLAYERSOLID, RayType_Infinite, TraceEntityFilterPlayer);
 
-                if (AllowNormalGravity[client] == false) { // Allow normal gravity if they are in a trigger_push entity or are swimming
-                    if (PlayerIsBoosting[client] == false) { // Only change their gravity if they aren't boosting themselves
-                        if (TR_DidHit(TraceZ)) { // Kinda useless since it will always hit, but better safe than sorry
-                            TR_GetEndPosition(ThingBelowPly, TraceZ);          
-                            new Float:PlyDistanceToGround = GetVectorDistance(plyPos, ThingBelowPly);
-                            PlyDistAboveGround[client] = PlyDistanceToGround;
+                if (PlayerIsBoosting[client] == true) { // The player is boosting themselves with explosions
+                    SetEntPropFloat(client, Prop_Data, "m_flGravity", 2.3); 
+                }
 
-                            if (PlyInitialHeight[client] == 0.0) {
-                                PlyInitialHeight[client] = PlyDistanceToGround;
-                            }
+                bool AllowGravChange = (AllowNormalGravity[client] == false && PlayerIsBoosting[client] == false);
+                
+                if (TR_DidHit(TraceZ)) { // Kinda useless since it will always hit, but better safe than sorry
+                    TR_GetEndPosition(ThingBelowPly, TraceZ);          
+                    new Float:PlyDistanceToGround = GetVectorDistance(plyPos, ThingBelowPly);
+                    PlyDistAboveGround[client] = PlyDistanceToGround;
 
-                            if (PlyInitialHeight[client] > 300) { // Make it seem like they are NOT being sucked into the ground when falling from high up
-                                SetEntPropFloat(client, Prop_Data, "m_flGravity", 2.3); 
-                            } else {
-                                if (PlyDistanceToGround > MAXAIRHEIGHT) { // They are officially in the air now
-                                    ISDM_AddPerk(client, ISDM_Perks[ISDM_AirPerk]);
-                                }
-
-                                new Float:GravityEquation = (GetVectorDistance(plyPos, ThingBelowPly) / 50.0); // The higher you are the more brutal the gravity increases (Unless you start falling from high up already)               
-                                if (GravityEquation > 1.0) { // Make sure low gravity never occurs
-                                    SetEntPropFloat(client, Prop_Data, "m_flGravity", GravityEquation);   
-                                }   
-                            }  
-                            CloseHandle(TraceZ);  
-                        } else {
-                            CloseHandle(TraceZ);  
-                        }
-                    } else { // The player is boosting themselves with explosions
-                        SetEntPropFloat(client, Prop_Data, "m_flGravity", 2.3); 
+                    if (PlyInitialHeight[client] == 0.0) {
+                        PlyInitialHeight[client] = PlyDistanceToGround;
                     }
-                } 
+
+                    if (PlyInitialHeight[client] > 300) { // Make it seem like they are NOT being sucked into the ground when falling from high up
+                        if (AllowGravChange) {
+                            SetEntPropFloat(client, Prop_Data, "m_flGravity", 2.3); 
+                        }
+                    } else {
+                        if (PlyDistanceToGround > MAXAIRHEIGHT) { // They are officially in the air now
+                            ISDM_AddPerk(client, ISDM_Perks[ISDM_AirPerk]);
+                        }
+
+                        new Float:GravityEquation = (GetVectorDistance(plyPos, ThingBelowPly) / 50.0); // The higher you are the more brutal the gravity increases (Unless you start falling from high up already)               
+                        if (GravityEquation > 1.0) { // Make sure low gravity never occurs
+                            if (AllowGravChange) {
+                                SetEntPropFloat(client, Prop_Data, "m_flGravity", GravityEquation);   
+                            }
+                        }   
+                    }  
+                    CloseHandle(TraceZ);  
+                } else {
+                    CloseHandle(TraceZ);  
+                }   
             } else { // If player is on the ground
                 ISDM_DelFromArray(ISDM_Perks[ISDM_AirPerk], client);
                 SetEntPropFloat(client, Prop_Data, "m_flGravity", 1.0);
@@ -1151,8 +1165,7 @@ public ISDM_SkateSound(client) { // Plays a random ice skate sound for skating p
 public Action:ISDM_IncrementSkate(Handle:timer, any:client) {
     if (IsValidEntity(client)) {   
         if (GetClientButtons(client) & 1 << 9 && GetClientButtons(client) & 1 << 10 ) {
-        } else if (PlyTouchingWaterProp[client] == false) { 
-            PrintToChat(client, "not on water");       
+        } else if (PlyTouchingWaterProp[client] == false) {    
             if (PlySkates[client] < 8) { // Give them an easy chance to skate fast
                 PlySkates[client] = PlySkates[client] + 2;
             } else if (PlySkates[client] < 20) {
@@ -1161,7 +1174,6 @@ public Action:ISDM_IncrementSkate(Handle:timer, any:client) {
                 PlySkates[client] = PlySkates[client] + 0.5; // They are going super fast, add smaller speed boosts
             }   
         } else if (PlyTouchingWaterProp[client] == true) { // They are sliding on water, make them skate slightly faster
-            PrintToChat(client, "on water");  
             if (PlySkates[client] < 8) { // Give them an easy chance to skate fast
                 PlySkates[client] = PlySkates[client] + 4;
             } else if (PlySkates[client] < 20) {
@@ -1223,24 +1235,42 @@ public void ISDM_UpdatePerks(client) {
         bool Speed3AndAir = (AllSpeedPerks && ISDM_GetPerk(client, ISDM_Perks[ISDM_AirPerk]));
         bool OnlyAirPerk = (ISDM_GetPerk(client, ISDM_Perks[ISDM_AirPerk]) && !Only1SpeedPerk && !Only2SpeedPerks && !AllSpeedPerks && !Speed1AndAir && !Speed2AndAir && !Speed3AndAir)
 
-        if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
-            ClientCommand(client, "r_screenoverlay 0");
-        }
+        if (PlyTouchingWaterProp[client] == true) {
+            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
+                ClientCommand(client, "r_screenoverlay IceSkateDM/iceperk");
+            }
 
+            if (Only1SpeedPerk && !Speed1AndAir) {
+                ClientCommand(client, "r_screenoverlay IceSkateDM/1speedperkandice");
+            }
+
+            if (Only2SpeedPerks && !Speed2AndAir) {
+                ClientCommand(client, "r_screenoverlay IceSkateDM/2speedperksandice");
+            }
+
+            if (AllSpeedPerks && !Speed3AndAir) {
+                ClientCommand(client, "r_screenoverlay IceSkateDM/allspeedperksandice");
+            }
+        } else {
+            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
+                ClientCommand(client, "r_screenoverlay 0");
+            }
+
+            if (Only1SpeedPerk && !Speed1AndAir) {
+                ClientCommand(client, "r_screenoverlay IceSkateDM/1speedperk");
+            }
+
+            if (Only2SpeedPerks && !Speed2AndAir) {
+                ClientCommand(client, "r_screenoverlay IceSkateDM/2speedperks");
+            }
+
+            if (AllSpeedPerks && !Speed3AndAir) {
+                ClientCommand(client, "r_screenoverlay IceSkateDM/allspeedperks");
+            }
+        }
+        
         if (OnlyAirPerk) {
             ClientCommand(client, "r_screenoverlay IceSkateDM/airperk");
-        }
-
-        if (Only1SpeedPerk && !Speed1AndAir) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/1speedperk");
-        }
-
-        if (Only2SpeedPerks && !Speed2AndAir) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/2speedperks");
-        }
-
-        if (AllSpeedPerks && !Speed3AndAir) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/allspeedperks");
         }
 
         if (Speed1AndAir) {
@@ -1255,25 +1285,43 @@ public void ISDM_UpdatePerks(client) {
             ClientCommand(client, "r_screenoverlay IceSkateDM/allspeedperksandair");
         }
         
-        if (SkatedRight[client] && GetClientButtons(client) & IN_MOVERIGHT) {          
-            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftarrow");
-            }
+        if (SkatedRight[client] && GetClientButtons(client) & IN_MOVERIGHT) {
+            if (PlyTouchingWaterProp[client] == true) { // Show ice perk as well if they are sliding on water
+                if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandice");
+                } 
+
+                if (Only1SpeedPerk && !Speed1AndAir) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/left1speedperkandice");
+                }
+
+                if (Only2SpeedPerks && !Speed2AndAir) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/left2speedperksandice");
+                }
+
+                if (AllSpeedPerks && !Speed3AndAir) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftallspeedperksandice");
+                }    
+            } else {
+                if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftarrow");
+                } 
+
+                if (Only1SpeedPerk && !Speed1AndAir) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftand1speedperk");
+                }
+
+                if (Only2SpeedPerks && !Speed2AndAir) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftand2speedperks");
+                }
+
+                if (AllSpeedPerks && !Speed3AndAir) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandallspeedperks");
+                }
+            }   
 
             if (OnlyAirPerk) {
                 ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandairperk");
-            }
-
-            if (Only1SpeedPerk && !Speed1AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftand1speedperk");
-            }
-
-            if (Only2SpeedPerks && !Speed2AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftand2speedperks");
-            }
-
-            if (AllSpeedPerks && !Speed3AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandallspeedperks");
             }
 
             if (Speed1AndAir) {
@@ -1290,24 +1338,42 @@ public void ISDM_UpdatePerks(client) {
         }
             
         if (SkatedLeft[client] && GetClientButtons(client) & IN_MOVELEFT) {
-            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightarrow");
+            if (PlyTouchingWaterProp[client] == true) { // Show ice perk as well if they are sliding on water
+                if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandice");
+                }
+
+                if (Only1SpeedPerk && !Speed1AndAir) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/right1speedperkandice");
+                }
+
+                if (Only2SpeedPerks && !Speed2AndAir) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/right2speedperksandice");
+                }
+
+                if (AllSpeedPerks && !Speed3AndAir) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightallspeedperksandice");
+                }
+            } else {
+                if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightarrow");
+                }
+
+                if (Only1SpeedPerk && !Speed1AndAir) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightand1speedperk");
+                }
+
+                if (Only2SpeedPerks && !Speed2AndAir) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightand2speedperks");
+                }
+
+                if (AllSpeedPerks && !Speed3AndAir) {
+                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandallspeedperks");
+                }
             }
 
             if (OnlyAirPerk) {
                 ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandairperk");
-            }
-
-            if (Only1SpeedPerk && !Speed1AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightand1speedperk");
-            }
-
-            if (Only2SpeedPerks && !Speed2AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightand2speedperks");
-            }
-
-            if (AllSpeedPerks && !Speed3AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandallspeedperks");
             }
 
             if (Speed1AndAir) {
