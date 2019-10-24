@@ -5,7 +5,6 @@
 // (Could maybe use an entity distance checking function to determine distance in the map?)
 // (Could maybe make a line trace for every prop calculating the max playable height?) (Bigger height = Bigger map)
 // 8. Fix gun noises from cutting off from the fast firing code
-// 11. Add perk player model colors
 
 public Plugin:myinfo =
 {
@@ -78,6 +77,8 @@ new Handle:TimeForSkateSound[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:NearbyEntSearch[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:PushData[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:CheckingForTriggers[MAXPLAYERS + 1] = INVALID_HANDLE;
+new Handle:RenderingMat[MAXPLAYERS + 1] = INVALID_HANDLE;
+new Handle:StoppingSounds[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ForceReloading[MAXPLAYERS + 1] = false;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
@@ -91,6 +92,7 @@ bool PlayerIsBoosting[MAXPLAYERS + 1] = false;
 bool AllowNormalGravity[MAXPLAYERS + 1] = false;
 bool PlyOnWaterProp[MAXPLAYERS + 1] = false;
 bool PlyTouchingWaterProp[MAXPLAYERS + 1] = false;
+new String:RenderedMaterial[MAXPLAYERS + 1][60];
 new Float:MAXSLOWSPEED;
 new Float:MAXAIRHEIGHT;
 new Float:SPEED1SPEED;
@@ -115,6 +117,8 @@ public ISDM_ResetPlyStats(client) {
     ForceReloading[client] = INVALID_HANDLE;
     PushData[client] = INVALID_HANDLE;
     CheckingForTriggers[client] = INVALID_HANDLE;
+    RenderingMat[client] = INVALID_HANDLE;
+    StoppingSounds[client] = INVALID_HANDLE;
     ElapsedLeftTime[client] = 0;   
     ElapsedRightTime[client] = 0; 
     PlySkates[client] = 0.0;
@@ -138,6 +142,7 @@ enum Perks
     ISDM_NoPerks,
     ISDM_SlowPerk,
     ISDM_AirPerk,
+    ISDM_IcePerk,
     ISDM_SpeedPerk1,
     ISDM_SpeedPerk2,
     ISDM_SpeedPerk3
@@ -234,7 +239,6 @@ public void ISDM_DelFromArray(Handle:array, item) {
 }
 
 public OnGameFrame() {
-    ISDM_StopSounds();
     for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
         if (IsValidEntity(i)) {
             if (IsClientInGame(i)) {  
@@ -321,9 +325,12 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
     }
 
     if (damagetype & DMG_FALL) { // Disable disgusting fall damage
-        damage = 0.0;
-        ISDM_ImpactSound(victim); // Function to replace the fall damage sound
-        return Plugin_Changed;
+        if (StoppingSounds[victim] == INVALID_HANDLE) {
+            StoppingSounds[victim] = CreateTimer(0.0, ISDM_StopSounds, victim);
+            damage = 0.0;
+            ISDM_ImpactSound(victim); // Function to replace the fall damage sound
+            return Plugin_Changed;
+        }
     }
 
     if (damagetype & DMG_BLAST) {
@@ -1122,11 +1129,10 @@ public bool:TraceEntityFilterPlayer(entity, contentsMask)
 int CHAN_AUTO = 0;
 int SNDLVL_NORM = 75;
 
-public ISDM_StopSounds() { // These are the sounds that are replaced/unwanted
-    for (new i = 1; i <= ISDM_MaxPlayers; i++) {
-        StopSound(i, CHAN_AUTO, "player/pl_fallpain1.wav");
-        StopSound(i, CHAN_AUTO, "player/pl_fallpain3.wav");
-    }
+public Action:ISDM_StopSounds(Handle:timer, any:client) { // These are the sounds that are replaced/unwanted
+    PrintToServer("Stopping sounds");
+    StopSound(client, CHAN_AUTO, "player/pl_fallpain1.wav");
+    StopSound(client, CHAN_AUTO, "player/pl_fallpain3.wav");
 }
 
 public ISDM_MuteSkateSounds(client) { // Stops emitting ice skate sounds from a client
@@ -1225,6 +1231,27 @@ public void ISDM_UpdatePerkVars() {
     MAXAIRHEIGHT = GetConVarFloat(FindConVar("ISDM_AirPerkHeight"));
 }
 
+public void ISDM_RenderPerk(client, String:perkname[60], direction) {
+    if (strcmp(RenderedMaterial[client], perkname, true) != 0) {
+        new String:Cmd[60];
+
+        if (direction == 0) {
+            Format(Cmd, 60, "r_screenoverlay IceSkateDM/%s", perkname);
+        }
+
+        if (direction == 1) {
+            Format(Cmd, 60, "r_screenoverlay IceSkateDM/Left/%s", perkname);  
+        }
+
+        if (direction == 2) {
+            Format(Cmd, 60, "r_screenoverlay IceSkateDM/Right/%s", perkname);  
+        }
+        
+        ClientCommand(client, Cmd);
+        RenderedMaterial[client] = perkname;
+    }
+}
+
 public void ISDM_UpdatePerks(client) {
     if (IsValidEntity(client)) {
         bool Only1SpeedPerk = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk1]) && !ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]));
@@ -1235,157 +1262,179 @@ public void ISDM_UpdatePerks(client) {
         bool Speed3AndAir = (AllSpeedPerks && ISDM_GetPerk(client, ISDM_Perks[ISDM_AirPerk]));
         bool OnlyAirPerk = (ISDM_GetPerk(client, ISDM_Perks[ISDM_AirPerk]) && !Only1SpeedPerk && !Only2SpeedPerks && !AllSpeedPerks && !Speed1AndAir && !Speed2AndAir && !Speed3AndAir)
 
-        if (PlyTouchingWaterProp[client] == true) {
-            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/iceperk");
-            }
+        //////////// Perk player colors /////////////////////
+        if (ISDM_GetPerk(client, ISDM_Perks[ISDM_AirPerk])) {
+            SetEntityRenderColor(client, 234, 0, 0, 255); 
+        }
 
-            if (Only1SpeedPerk && !Speed1AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/1speedperkandice");
-            }
+        if (Only1SpeedPerk && !Speed1AndAir) {
+            SetEntityRenderColor(client, 81, 124, 255, 255); 
+        }
 
-            if (Only2SpeedPerks && !Speed2AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/2speedperksandice");
-            }
+        if (Only2SpeedPerks && !Speed2AndAir) {
+            SetEntityRenderColor(client, 10, 71, 255, 255);
+        }
 
-            if (AllSpeedPerks && !Speed3AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/allspeedperksandice");
-            }
+        if (AllSpeedPerks && !Speed3AndAir) {
+            SetEntityRenderColor(client, 0, 10, 209, 255);
+        }
+        /////////////////////////////////////////////////////
+
+        if (GetClientButtons(client) & IN_MOVERIGHT || GetClientButtons(client) & IN_MOVELEFT) {
         } else {
-            if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
-                ClientCommand(client, "r_screenoverlay 0");
+            if (PlyTouchingWaterProp[client] == true) {
+                if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
+                    ISDM_RenderPerk(client, "iceperk", 0);
+                    SetEntityRenderColor(client, 76, 255, 246, 255); 
+                }
+
+                if (Only1SpeedPerk && !Speed1AndAir) {
+                    ISDM_RenderPerk(client, "1speedperkandice", 0);  
+                }
+
+                if (Only2SpeedPerks && !Speed2AndAir) {
+                    ISDM_RenderPerk(client, "2speedperksandice", 0);
+                }
+
+                if (AllSpeedPerks && !Speed3AndAir) {
+                    ISDM_RenderPerk(client, "allspeedperksandice", 0);
+                }
+            } else {
+                if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
+                    ISDM_RenderPerk(client, "0", 0);   
+                }
+
+                if (Only1SpeedPerk && !Speed1AndAir) {
+                    ISDM_RenderPerk(client, "1speedperk", 0);       
+                }
+
+                if (Only2SpeedPerks && !Speed2AndAir) {
+                    ISDM_RenderPerk(client, "2speedperks", 0);
+                }
+
+                if (AllSpeedPerks && !Speed3AndAir) {
+                    ISDM_RenderPerk(client, "allspeedperks", 0);
+                }
             }
 
-            if (Only1SpeedPerk && !Speed1AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/1speedperk");
+            if (OnlyAirPerk) {
+                ISDM_RenderPerk(client, "airperk", 0);
             }
 
-            if (Only2SpeedPerks && !Speed2AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/2speedperks");
+            if (Speed1AndAir) {
+                ISDM_RenderPerk(client, "1speedperkandair", 0);
             }
 
-            if (AllSpeedPerks && !Speed3AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/allspeedperks");
+            if (Speed2AndAir) {
+                ISDM_RenderPerk(client, "2speedperksandair", 0); 
             }
-        }
-        
-        if (OnlyAirPerk) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/airperk");
-        }
 
-        if (Speed1AndAir) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/1speedperkandair");
-        }
-
-        if (Speed2AndAir) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/2speedperksandair");
-        }
-
-        if (Speed3AndAir) {
-            ClientCommand(client, "r_screenoverlay IceSkateDM/allspeedperksandair");
+            if (Speed3AndAir) {
+                ISDM_RenderPerk(client, "allspeedperksandair", 0); 
+            }
         }
         
         if (SkatedRight[client] && GetClientButtons(client) & IN_MOVERIGHT) {
             if (PlyTouchingWaterProp[client] == true) { // Show ice perk as well if they are sliding on water
                 if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandice");
+                    ISDM_RenderPerk(client, "leftandice", 1); 
                 } 
 
                 if (Only1SpeedPerk && !Speed1AndAir) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/left1speedperkandice");
+                    ISDM_RenderPerk(client, "left1speedperkandice", 1); 
                 }
 
                 if (Only2SpeedPerks && !Speed2AndAir) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/left2speedperksandice");
+                    ISDM_RenderPerk(client, "left2speedperksandice", 1); 
                 }
 
                 if (AllSpeedPerks && !Speed3AndAir) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftallspeedperksandice");
+                    ISDM_RenderPerk(client, "leftallspeedperksandice", 1); 
                 }    
             } else {
                 if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftarrow");
+                    ISDM_RenderPerk(client, "leftarrow", 1); 
                 } 
 
                 if (Only1SpeedPerk && !Speed1AndAir) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftand1speedperk");
+                    ISDM_RenderPerk(client, "leftand1speedperk", 1); 
                 }
 
                 if (Only2SpeedPerks && !Speed2AndAir) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftand2speedperks");
+                    ISDM_RenderPerk(client, "leftand2speedperks", 1); 
                 }
 
                 if (AllSpeedPerks && !Speed3AndAir) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandallspeedperks");
+                    ISDM_RenderPerk(client, "leftandallspeedperks", 1); 
                 }
             }   
 
             if (OnlyAirPerk) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftandairperk");
+                ISDM_RenderPerk(client, "leftandairperk", 1); 
             }
 
             if (Speed1AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/left1speedperkandair");
+                ISDM_RenderPerk(client, "left1speedperkandair", 1); 
             }
 
             if (Speed2AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/left2speedperksandair");
+                ISDM_RenderPerk(client, "left2speedperksandair", 1); 
             }
 
             if (Speed3AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Left/leftallspeedperksandair");
+                ISDM_RenderPerk(client, "leftallspeedperksandair", 1); 
             }
         }
             
         if (SkatedLeft[client] && GetClientButtons(client) & IN_MOVELEFT) {
             if (PlyTouchingWaterProp[client] == true) { // Show ice perk as well if they are sliding on water
                 if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandice");
+                    ISDM_RenderPerk(client, "rightandice", 2); 
                 }
 
                 if (Only1SpeedPerk && !Speed1AndAir) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/right1speedperkandice");
+                    ISDM_RenderPerk(client, "right1speedperkandice", 2); 
                 }
 
                 if (Only2SpeedPerks && !Speed2AndAir) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/right2speedperksandice");
+                    ISDM_RenderPerk(client, "right2speedperksandice", 2); 
                 }
 
                 if (AllSpeedPerks && !Speed3AndAir) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightallspeedperksandice");
+                    ISDM_RenderPerk(client, "rightallspeedperksandice", 2); 
                 }
             } else {
                 if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightarrow");
+                    ISDM_RenderPerk(client, "rightarrow", 2); 
                 }
 
                 if (Only1SpeedPerk && !Speed1AndAir) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightand1speedperk");
+                    ISDM_RenderPerk(client, "rightand1speedperk", 2); 
                 }
 
                 if (Only2SpeedPerks && !Speed2AndAir) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightand2speedperks");
+                    ISDM_RenderPerk(client, "rightand2speedperks", 2); 
                 }
 
                 if (AllSpeedPerks && !Speed3AndAir) {
-                    ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandallspeedperks");
+                    ISDM_RenderPerk(client, "rightandallspeedperks", 2); 
                 }
             }
 
             if (OnlyAirPerk) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightandairperk");
+                ISDM_RenderPerk(client, "rightandairperk", 2); 
             }
 
             if (Speed1AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/right1speedperkandair");
+                ISDM_RenderPerk(client, "right1speedperkandair", 2); 
             }
 
             if (Speed2AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/right2speedperksandair");
+                ISDM_RenderPerk(client, "right2speedperksandair", 2); 
             }
 
             if (Speed3AndAir) {
-                ClientCommand(client, "r_screenoverlay IceSkateDM/Right/rightallspeedperksandair");
+                ISDM_RenderPerk(client, "rightallspeedperksandair", 2); 
             }
         }
     }
