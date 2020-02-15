@@ -1676,7 +1676,6 @@ public Action:GetClosestPlyToProj(Handle:timer, any:entity) { // Calculates the 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Admin Commands: 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 Action:ISDM_Toggle(int client, int args) // Toggle on/off gamemode from the gamemode's menu or console/chat
 {
     bool enableIt = !ISDMEnabled;
@@ -1714,6 +1713,19 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2) // Adm
         if (StrEqual(info, "ISDM_Toggle"))
         {
             ISDM_Toggle(param2, 0);
+        }
+
+        if (IsValidEntity(param1) && IsClientInGame(param1))
+        {
+            if (StrEqual(info, "ISDM_VoteSpeed"))
+            {
+                ISDM_SpeedScaleMenu(param1, true);
+            }
+            
+            if (StrEqual(info, "ISDM_SpeedScale"))
+            {
+                ISDM_SpeedScaleMenu(param1, false);
+            }
         }
     }
 
@@ -1753,6 +1765,19 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2) // Adm
     }
 }
 
+public int ISDMVoteScale(Menu menu, MenuAction action, int param1, int param2)
+{
+    if (action == MenuAction_End)
+    {
+        delete menu;
+    }
+}
+
+public int ISDMSpeedScaleMenu(Menu menu, MenuAction action, int param1, int param2)
+{
+
+}
+
 Action:ISDM_Menu(int client, int args) // Show gamemode's menu to user
 {
     Menu menu = new Menu(ISDMMenu, MENU_ACTIONS_ALL);
@@ -1760,6 +1785,30 @@ Action:ISDM_Menu(int client, int args) // Show gamemode's menu to user
     menu.AddItem("ISDM_Toggle", "Toggle ISDM");
     menu.AddItem("ISDM_SpeedScale", "Set Speed Scale");
     menu.AddItem("ISDM_VoteSpeed", "Vote Speed Scale");
+    menu.ExitButton = true;
+    menu.Display(client, 0);
+}
+
+void ISDM_SpeedScaleMenu(int client, bool isVoting) // Display wide range of speed multipliers to vote/set to by menu
+{
+    Menu menu = new Menu(ISDMSpeedScaleMenu, MENU_ACTIONS_ALL);
+
+    if (isVoting)
+    {
+        menu.SetTitle("Vote Speed Scale");
+    }
+    else
+    {
+        menu.SetTitle("Save Speed Scale for map");
+    }
+
+    for (float i = 0.1; i <= 15.1; i += 0.1)
+    {
+        char selectName[50];
+        Format(selectName, 50, "%.1f", i);
+        menu.AddItem("ISDM_SpeedScale", selectName);
+    }
+
     menu.ExitButton = true;
     menu.Display(client, 0);
 }
