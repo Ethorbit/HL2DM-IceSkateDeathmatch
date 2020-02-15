@@ -77,11 +77,13 @@ new Handle:CheckingForTriggers[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:RenderingMat[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:StoppingSounds[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ForceReloading[MAXPLAYERS + 1] = false;
+new Handle:ISDM_Speedscale = INVALID_HANDLE;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
-new Float:PlySkates[MAXPLAYERS + 1] = 0.0;
-new Float:PlyInitialHeight[MAXPLAYERS + 1] = 0.0;
-new Float:PlyDistAboveGround[MAXPLAYERS + 1] = 0.0;
+float PlySkates[MAXPLAYERS + 1] = 0.0;
+float PlyInitialHeight[MAXPLAYERS + 1] = 0.0;
+float PlyDistAboveGround[MAXPLAYERS + 1] = 0.0;
+bool ISDMEnabled = true;
 bool SkatedLeft[MAXPLAYERS + 1] = false;
 bool SkatedRight[MAXPLAYERS + 1] = false;
 bool DeniedSprintSoundPlayed[MAXPLAYERS + 1] = false;
@@ -95,7 +97,7 @@ float MAXAIRHEIGHT;
 float SPEED1SPEED;
 float SPEED2SPEED;
 float SPEED3SPEED;
-float SpeedMultiplier = 1.0;
+float SPEEDSCALE;
 
 new String:TheRightWeapons[][] = { // Weapons that will have their fire speeds (not reload speeds) modified by speed perks
     "weapon_357", 
@@ -163,6 +165,8 @@ public void OnMapStart() { // OnPluginStart() does NOT run every map change resu
 }
 
 public void OnPluginStart() { // OnMapStart() will not be called by just simply reloading the plugin
+    RegConsoleCmd("ISDM", ISDM_Menu);
+    RegAdminCmd("ISDM_Toggle", ISDM_Toggle, ADMFLAG_BAN, "Toggle on/off the Ice Skate Deathmatch gamemode at run-time");
     ISDM_Initialize();
 }
 
@@ -187,11 +191,20 @@ void RemoveISDM() // Reset the server back to normal like the plugin was never l
     SetConVarFloat(FindConVar("physcannon_maxforce"), 1500.0, false, false);
     SetConVarFloat(FindConVar("physcannon_pullforce"), 4000.0, false, false);
     //ServerCommand("exec autoexec.cfg"); 
+
+    for (int i = 1; i <= ISDM_MaxPlayers; i++)
+    {
+        if (IsValidEntity(i) && IsClientInGame(i))
+        {
+            ISDM_ResetPlyStats(i);
+            ISDM_DeleteWaterProp(i);
+            ClientCommand(i, "r_screenoverlay 0");
+        }
+    }
 }
 
-void ISDM_Initialize() 
+void ISDM_SetConVars()
 {
-    ISDM_MaxPlayers = GetMaxClients(); 
     SetConVarInt(FindConVar("sv_footsteps"), 0, false, false); // Footstep sounds are replaced with skating sounds
     SetConVarFloat(FindConVar("sv_friction"), 0.5, false, false); // No other way found so far to allow players to slide :(
     SetConVarFloat(FindConVar("sv_accelerate"), 100.0, false, false); // Very much optional, playable without it
@@ -200,12 +213,19 @@ void ISDM_Initialize()
     SetConVarFloat(FindConVar("physcannon_minforce"), 20000.0, false, false); 
     SetConVarFloat(FindConVar("physcannon_maxforce"), 20000.0, false, false); // Not too fast, but not too slow for new player speeds either
     SetConVarFloat(FindConVar("physcannon_pullforce"), 10000.0, false, false); // Allow players to pull stuff 2.5x farther (not much of a difference)
+}
+
+void ISDM_Initialize() 
+{
+    ISDM_SetConVars();
+    ISDM_MaxPlayers = GetMaxClients(); 
     ISDM_PerkVars[SlowPerkSpeedConVar] = CreateConVar("ISDM_SlowPerkSpeed", "210.0", "The maximum speed players can go to get Slow Perk", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[FastPerk1SpeedConVar] = CreateConVar("ISDM_FastPerk1Speed", "600.0", "The maximum speed players can go to get Fast Perk #1", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[FastPerk2SpeedConVar] = CreateConVar("ISDM_FastPerk2Speed", "1200.0", "The maximum speed players can go to get Fast Perk #2", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[FastPerk3SpeedConVar] = CreateConVar("ISDM_FastPerk3Speed", "1500.0", "The maximum speed players can go to get Fast Perk #3", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[AirPerkHeightConVar] = CreateConVar("ISDM_AirPerkHeight", "50.0", "The minimum height speed players need to go before they get Air Perk", FCVAR_SERVER_CAN_EXECUTE);
-    CreateConVar("ISDM_SpeedScale", "1.0", "The multiplier for the speed player's gain from ice skating", FCVAR_NOTIFY);
+    ISDM_Speedscale = CreateConVar("ISDM_SpeedScale", "1.0", "The multiplier for the speed players gain from ice skating", FCVAR_SERVER_CAN_EXECUTE);
+    //AddCommandListener(ISDM_Toggle, "ISDM");
     ISDM_UpdatePerkVars();
 
     for (new i = 0; i < sizeof(ISDM_Materials); i++) { // Loop through all Ice Skate Deathmatch materials and force clients to download them
@@ -237,6 +257,8 @@ void ISDM_Initialize()
     for (new i = 0; i < sizeof(perkvar); i++) { // Loop through each perk convar and hook it to the ISDM_PerkChanged() function
         HookConVarChange(ISDM_PerkVars[perkvar[i]], ISDM_PerkChanged);
     }
+
+    HookConVarChange(ISDM_Speedscale, ISDM_NewSpeedScale);
 
     new const PerkIncrement[6] = {ISDM_NoPerks, ISDM_SlowPerk, ISDM_AirPerk, ISDM_SpeedPerk1, ISDM_SpeedPerk2, ISDM_SpeedPerk3};
     for (new i = 0; i < sizeof(PerkIncrement); i++) { // Loop through each perk and assign it to an array
@@ -283,11 +305,17 @@ public void OnGameFrame() {
     }
 }
 
+void ISDM_NewSpeedScale(Handle:convar, const String:oldValue[], const String:newValue[])  // Will auto change based on map-saved speed scales
+{
+    SPEEDSCALE = GetConVarFloat(FindConVar("ISDM_SpeedScale"));
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// ISDM DAMAGE LOGIC /////////////////////////////////
 void ISDM_DealDamage(victim, damage, attacker=0, damageType=DMG_GENERIC, String:weapon[]="") {
-	if (IsValidEntity(victim) && IsValidEntity(attacker) && IsPlayerAlive(victim)) {
+	if (!ISDMEnabled) return;
+    
+    if (IsValidEntity(victim) && IsValidEntity(attacker) && IsPlayerAlive(victim)) {
 		new String:DmgString[16];
 		new String:DmgTypeString[32];
         IntToString(damage, DmgString,16);
@@ -314,6 +342,8 @@ void ISDM_DealDamage(victim, damage, attacker=0, damageType=DMG_GENERIC, String:
 }
 
 public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &damagetype) {
+    if (!ISDMEnabled) return Plugin_Continue;
+    
     // Allow trigger_hurt entities to still kill players regardless of the conditions set later on:
     if (IsValidEntity(inflictor)) { 
         new String:InflictorClass[32];
@@ -405,6 +435,8 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
 }
 
 public Action:ISDM_Touched(entity, entity2) {
+    if (!ISDMEnabled) return;
+    
     if (IsValidEntity(entity) && IsValidEntity(entity2)) {
         new String:EntClass[32];
         new String:EntClass2[32];
@@ -448,6 +480,8 @@ public Action:ISDM_Touched(entity, entity2) {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// ISDM BOOSTING LOGIC /////////////////////////////////
 public Action:ISDM_GroundCheck(Handle:timer, any:client) { // Gives the boosting system a chance to actually set them as boosting
+    if (!ISDMEnabled) return;
+   
     if (IsValidEntity(client)) {
         bool NotOnGround = (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1);
 
@@ -458,6 +492,8 @@ public Action:ISDM_GroundCheck(Handle:timer, any:client) { // Gives the boosting
 }
 
 public void ISDM_BoostPlayer(client, String:Weapon[]) {
+    if (!ISDMEnabled) return;
+    
     if (IsPlayerAlive(client)) {
         new Float:PlyVel[3];
         GetEntPropVector(client, Prop_Data, "m_vecVelocity", PlyVel);
@@ -506,6 +542,8 @@ static bool:ISDM_EntVisible(client, entity) { // Will trace from player's eyes t
 }
 
 public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:data) { 
+    if (!ISDMEnabled) return;
+    
     ResetPack(data);
     if (IsPackReadable(data, 1)) {
         int client = ReadPackCell(data);
@@ -516,6 +554,8 @@ public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:data) {
         GetClientAbsOrigin(client, clientOrigin);
 
         for (new i = 0; i < GetMaxEntities(); i++) {
+            if (!ISDMEnabled) break;
+
             if (IsValidEntity(i) && IsValidEntity(client) && IsPlayerAlive(client) && IsClientConnected(client)) {        
                 new String:Targetname[32];
                 GetEntPropString(i, Prop_Data, "m_iName", Targetname, 32);
@@ -565,13 +605,15 @@ public Action:ISDM_PushNearbyEnts(Handle:timer, Handle:data) {
 }
 
 public Action:ISDM_FixProps(Handle:timer, any:entity) {
+    if (!ISDMEnabled) return;
+
     if (GetEntPropEnt(entity, Prop_Data, "m_hPhysicsAttacker") != -1) {
         SetEntPropEnt(entity, Prop_Data, "m_hPhysicsAttacker", -1); 
     } 
 }
 
-stock ISDM_IncreaseFire(client, Float:Amount) {
-	new ent = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
+stock ISDM_IncreaseFire(client, Float:Amount) {  
+    new ent = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
 	if (ent != -1) {
 		new Float:m_flNextPrimaryAttack = GetEntPropFloat(ent, Prop_Send, "m_flNextPrimaryAttack");
 		new Float:m_flNextSecondaryAttack = GetEntPropFloat(ent, Prop_Send, "m_flNextSecondaryAttack");
@@ -616,6 +658,8 @@ public Action:ISDM_ForceReload(Handle:timer, any:client) { // A timed timer to f
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////// ISDM PROP STUFF //////////////////////////////////////
 void ISDM_CreateWaterEnt(client) {
+    if (!ISDMEnabled) return;
+    
     new String:PropName[32];
     new Float:currentPos[3];
     GetClientAbsOrigin(client, currentPos);
@@ -690,6 +734,8 @@ float ISDM_HitWorld(client) { // This trace will ensure that the 'Water Prop' is
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], float angles[3]) {
+    if (!ISDMEnabled) return Plugin_Continue;
+
     new String:WepClass[32];
     new Float:currentPos[3];
     int PlyWep = GetEntPropEnt(client, Prop_Data, "m_hActiveWeapon");
@@ -1146,11 +1192,15 @@ int CHAN_AUTO = 0;
 int SNDLVL_NORM = 75;
 
 public Action:ISDM_StopSounds(Handle:timer, any:client) { // These are the sounds that are replaced/unwanted
+    if (!ISDMEnabled) return Plugin_Continue;
+
     StopSound(client, CHAN_AUTO, "player/pl_fallpain1.wav");
     StopSound(client, CHAN_AUTO, "player/pl_fallpain3.wav");
 }
 
 void ISDM_MuteSkateSounds(client) { // Stops emitting ice skate sounds from a client
+    if (!ISDMEnabled) return Plugin_Continue;
+
     new String:SkateSounds[][] = {"skate01", "skate02", "skate03"};
     for (new i = 0; i < sizeof(SkateSounds); i++) {
         new String:SoundFile[58];
@@ -1162,6 +1212,8 @@ void ISDM_MuteSkateSounds(client) { // Stops emitting ice skate sounds from a cl
 }
 
 void ISDM_ImpactSound(client) { // Replaces the fall damage sound with the new ice one
+    if (!ISDMEnabled) return;
+
     new String:RandomImpact[][] = {"impact01.wav", "impact02.wav"};
     new String:SoundName[40];
     int RandomIndex = GetRandomInt(0, 1); 
@@ -1171,6 +1223,8 @@ void ISDM_ImpactSound(client) { // Replaces the fall damage sound with the new i
 }
 
 void ISDM_SkateSound(client) { // Plays a random ice skate sound for skating players
+    if (!ISDMEnabled) return;
+    
     if (!IsValidHandle(TimeForSkateSound[client])) { // If a skate sound isn't already in progress
         new String:RandomSound[][] = {"skate01", "skate02", "skate03"};
         new String:SoundName[40];
@@ -1184,6 +1238,8 @@ void ISDM_SkateSound(client) { // Plays a random ice skate sound for skating pla
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////// ISDM SKATE LOGIC //////////////////////////////////
 public Action:ISDM_IncrementSkate(Handle:timer, any:client) {
+    if (!ISDMEnabled) return Plugin_Continue;
+    
     if (IsValidEntity(client)) {   
         if (GetClientButtons(client) & 1 << 9 && GetClientButtons(client) & 1 << 10 ) {
         } else if (PlyTouchingWaterProp[client] == false) {    
@@ -1207,6 +1263,8 @@ public Action:ISDM_IncrementSkate(Handle:timer, any:client) {
 }
 
 public Action:ISDM_AddKeyTime(Handle:timer, any:client) {
+    if (!ISDMEnabled) return Plugin_Continue;
+    
     if (IsValidEntity(client)) {
         if (GetClientButtons(client) & IN_MOVELEFT) {
             ElapsedLeftTime[client]++;
@@ -1219,6 +1277,8 @@ public Action:ISDM_AddKeyTime(Handle:timer, any:client) {
 }
 
 public Action:ISDM_AddDirection(Handle:timer, any:client) {
+    if (!ISDMEnabled) return Plugin_Continue;
+
     if (IsValidEntity(client)) {
         if (GetClientButtons(client) & IN_MOVELEFT) {
             SkatedLeft[client] = true;
@@ -1247,6 +1307,8 @@ void ISDM_UpdatePerkVars() {
 }
 
 void ISDM_RenderPerk(client, String:perkname[60], direction) {
+    if (!ISDMEnabled) return;
+    
     if (strcmp(RenderedMaterial[client], perkname, true) != 0) {
         new String:Cmd[60];
 
@@ -1268,6 +1330,8 @@ void ISDM_RenderPerk(client, String:perkname[60], direction) {
 }
 
 void ISDM_UpdatePerks(client) {
+    if (!ISDMEnabled) return;
+
     if (IsValidEntity(client)) {
         bool Only1SpeedPerk = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk1]) && !ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]));
         bool Only2SpeedPerks = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]) && !ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3]));
@@ -1462,6 +1526,8 @@ void ISDM_UpdatePerks(client) {
 public Action:ISDM_DoNothing(Handle:timer, any:client) {}
 
 void ISDM_AddPerk(client, Handle:array) {
+    if (!ISDMEnabled) return;
+
     if (FindValueInArray(array, client) < 0) { 
         PushArrayCell(array, client);
         ClientCommand(client, "r_screenoverlay 0");
@@ -1486,7 +1552,9 @@ bool ISDM_GetPerk(client, perk) {
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////// ISDM ENTITY LOGIC ////////////////////////
-public OnEntityCreated(entity, const String:classname[]) {
+public void OnEntityCreated(entity, const String:classname[]) {
+    if (!ISDMEnabled) return;
+
     if (IsValidEntity(entity)) {  
         if (strcmp(classname, "prop_combine_ball", false) == 0) { // Make AR2 orb speed scale with speed perks
             CreateTimer(0.2, GetClosestPlyToProj, entity);
@@ -1500,6 +1568,8 @@ public OnEntityCreated(entity, const String:classname[]) {
 }
 
 public bool:IDM_NearTriggers(any:client) { // Loops through all trigger_brush entities and checks distance to selected player
+    if (!ISDMEnabled) return Plugin_Continue;
+    
     bool near = false;
     for (new i = 0; i <= GetMaxEntities(); i++) {
         if (IsValidEntity(i)) {
@@ -1527,6 +1597,8 @@ public bool:IDM_NearTriggers(any:client) { // Loops through all trigger_brush en
 }
 
 public Action:ISDM_CheckPlysNearTriggers(Handle:timer, any:entity) { // A looping timer to make sure the player never breaks out of the gravity system
+    if (!ISDMEnabled) return Plugin_Continue;
+    
     if (CheckingForTriggers[entity] == INVALID_HANDLE) {
         KillTimer(timer);
         return Plugin_Stop;
@@ -1539,6 +1611,8 @@ public Action:ISDM_CheckPlysNearTriggers(Handle:timer, any:entity) { // A loopin
 } 
 
 public Action:ISDM_TriggerTouch(entity, entity2) { // Player is touching a trigger_push, allow normal movement so they don't get stuck!
+    if (!ISDMEnabled) return Plugin_Continue;
+    
     if (IsValidEntity(entity) && IsValidEntity(entity2)) {
         if (entity2 > 0 && entity2 <= ISDM_MaxPlayers && IsPlayerAlive(entity2)) {
             AllowNormalGravity[entity2] = true;
@@ -1547,6 +1621,8 @@ public Action:ISDM_TriggerTouch(entity, entity2) { // Player is touching a trigg
 }
 
 public Action:ISDM_TriggerLeave(entity, entity2) { // Player is not being pushed by a trigger_push anymore, return to normal skate movement
+    if (!ISDMEnabled) return Plugin_Continue;
+    
     if (IsValidEntity(entity) && IsValidEntity(entity2)) {
         if (entity2 > 0 && entity2 <= ISDM_MaxPlayers) {  
             if (CheckingForTriggers[entity2] == INVALID_HANDLE) {
@@ -1558,6 +1634,8 @@ public Action:ISDM_TriggerLeave(entity, entity2) { // Player is not being pushed
      
 
 public Action:GetClosestPlyToProj(Handle:timer, any:entity) { // Calculates the closest player to the projectile entity, assumes this is the owner.
+    if (!ISDMEnabled) return Plugin_Continue;
+    
     if (IsValidEntity(entity)) {
         new Float:currentSpeed[3];
         GetEntPropVector(entity, Prop_Data, "m_vecVelocity", currentSpeed); // Projectile's speed
@@ -1596,7 +1674,89 @@ public Action:GetClosestPlyToProj(Handle:timer, any:entity) { // Calculates the 
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Admin Menu 
+// Admin Commands: 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+Action:ISDM_Toggle(int client, int args) // Toggle on/off gamemode from the gamemode's menu or console/chat
+{
+    bool enableIt = !ISDMEnabled;
+    if (enableIt)
+    {
+        PrintToChatAll("Ice Skate Deathmatch has been enabled.");
+        CreateTimer(2.0, EnableISDM);
+    }
+    else
+    {
+        PrintToChatAll("Ice Skate Deathmatch has been disabled.");
+        CreateTimer(2.0, DisableISDM);
+    }
+}
+
+public Action:EnableISDM(Handle Timer)
+{
+    ISDMEnabled = true;
+    ISDM_SetConVars();
+}
+
+public Action:DisableISDM(Handle Timer)
+{
+    ISDMEnabled = false;
+    RemoveISDM();
+}
+
+public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2) // Administrator/user menu for the gamemode
+{
+    bool isPlyAdmin = false;
+
+    AdminId adminid = GetUserAdmin(param1);
+    if (adminid.HasFlag(ADMFLAG_BAN, Access_Effective))
+    {
+        isPlyAdmin = true;
+    }
+
+    if (action == MenuAction_Select)
+    {
+        char info[32];
+        menu.GetItem(param2, info, sizeof(info));
+
+        if (StrEqual(info, "ISDM_Toggle"))
+        {
+            ISDM_Toggle(param2, 0);
+        }
+    }
+
+    if (action == MenuAction_DrawItem)
+    {   
+        int style;
+        char info[32];
+        menu.GetItem(param2, info, sizeof(info), style);
+
+        if (!isPlyAdmin) // Hide administrator items from regular users
+        {
+            if (StrEqual(info, "ISDM_Toggle") || StrEqual(info, "ISDM_SpeedScale"))
+            {
+                return ITEMDRAW_DISABLED;
+            }
+            else
+            {
+                return style;
+            }          
+        }
+    }
+
+    if (action == MenuAction_End)
+    {
+        delete menu;
+    }
+}
+
+Action:ISDM_Menu(int client, int args) // Show gamemode's menu to user
+{
+    Menu menu = new Menu(ISDMMenu, MENU_ACTIONS_ALL);
+    menu.SetTitle("Ice Skate Deathmatch", LANG_SERVER);
+    menu.AddItem("ISDM_Toggle", "Toggle ISDM");
+    menu.AddItem("ISDM_SpeedScale", "Set Speed Scale");
+    menu.AddItem("ISDM_VoteSpeed", "Vote Speed Scale");
+    menu.ExitButton = true;
+    menu.Display(client, 0);
+}
