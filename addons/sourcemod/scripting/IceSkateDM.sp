@@ -1,9 +1,6 @@
 // Ice Skate Deathmatch is a thing now thanks to Himanshu's choice of commands :)
 // TODO: 
 // 2. Add gamemode info somehow 
-// 5. Detect map size, change speeds accordingly 
-// (Could maybe use an entity distance checking function to determine distance in the map?)
-// (Could maybe make a line trace for every prop calculating the max playable height?) (Bigger height = Bigger map)
 // 8. Fix gun noises from cutting off from the fast firing code
 
 public Plugin:myinfo =
@@ -93,11 +90,12 @@ bool AllowNormalGravity[MAXPLAYERS + 1] = false;
 bool PlyOnWaterProp[MAXPLAYERS + 1] = false;
 bool PlyTouchingWaterProp[MAXPLAYERS + 1] = false;
 new String:RenderedMaterial[MAXPLAYERS + 1][60];
-new Float:MAXSLOWSPEED;
-new Float:MAXAIRHEIGHT;
-new Float:SPEED1SPEED;
-new Float:SPEED2SPEED;
-new Float:SPEED3SPEED;
+float MAXSLOWSPEED;
+float MAXAIRHEIGHT;
+float SPEED1SPEED;
+float SPEED2SPEED;
+float SPEED3SPEED;
+float SpeedMultiplier = 1.0;
 
 new String:TheRightWeapons[][] = { // Weapons that will have their fire speeds (not reload speeds) modified by speed perks
     "weapon_357", 
@@ -188,6 +186,7 @@ void RemoveISDM() // Reset the server back to normal like the plugin was never l
     SetConVarFloat(FindConVar("physcannon_minforce"), 700.0, false, false); 
     SetConVarFloat(FindConVar("physcannon_maxforce"), 1500.0, false, false);
     SetConVarFloat(FindConVar("physcannon_pullforce"), 4000.0, false, false);
+    //ServerCommand("exec autoexec.cfg"); 
 }
 
 void ISDM_Initialize() 
@@ -206,6 +205,7 @@ void ISDM_Initialize()
     ISDM_PerkVars[FastPerk2SpeedConVar] = CreateConVar("ISDM_FastPerk2Speed", "1200.0", "The maximum speed players can go to get Fast Perk #2", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[FastPerk3SpeedConVar] = CreateConVar("ISDM_FastPerk3Speed", "1500.0", "The maximum speed players can go to get Fast Perk #3", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[AirPerkHeightConVar] = CreateConVar("ISDM_AirPerkHeight", "50.0", "The minimum height speed players need to go before they get Air Perk", FCVAR_SERVER_CAN_EXECUTE);
+    CreateConVar("ISDM_SpeedScale", "1.0", "The multiplier for the speed player's gain from ice skating", FCVAR_NOTIFY);
     ISDM_UpdatePerkVars();
 
     for (new i = 0; i < sizeof(ISDM_Materials); i++) { // Loop through all Ice Skate Deathmatch materials and force clients to download them
@@ -342,10 +342,11 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
     if (damagetype & DMG_FALL) { // Disable disgusting fall damage
         if (StoppingSounds[victim] == INVALID_HANDLE) {
             StoppingSounds[victim] = CreateTimer(0.0, ISDM_StopSounds, victim);
-            damage = 0.0;
             ISDM_ImpactSound(victim); // Function to replace the fall damage sound
-            return Plugin_Changed;
         }
+
+        damage = 0.0;
+        return Plugin_Changed;
     }
 
     if (damagetype & DMG_BLAST) {
