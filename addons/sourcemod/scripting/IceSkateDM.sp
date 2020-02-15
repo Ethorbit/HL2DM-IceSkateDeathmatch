@@ -1706,14 +1706,6 @@ public Action:DisableISDM(Handle Timer)
 
 public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2) // Administrator/user menu for the gamemode
 {
-    bool isPlyAdmin = false;
-
-    AdminId adminid = GetUserAdmin(param1);
-    if (adminid.HasFlag(ADMFLAG_BAN, Access_Effective))
-    {
-        isPlyAdmin = true;
-    }
-
     if (action == MenuAction_Select)
     {
         char info[32];
@@ -1727,6 +1719,17 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2) // Adm
 
     if (action == MenuAction_DrawItem)
     {   
+        bool isPlyAdmin = false;
+
+        if (IsValidEntity(param1 && IsClientInGame(param1)))
+        {
+            AdminId adminid = GetUserAdmin(param1);
+            if (adminid.HasFlag(ADMFLAG_BAN, Access_Effective))
+            {
+                isPlyAdmin = true;
+            }
+        }
+
         int style;
         char info[32];
         menu.GetItem(param2, info, sizeof(info), style);
