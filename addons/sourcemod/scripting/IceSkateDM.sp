@@ -11,7 +11,7 @@ public Plugin:myinfo =
 	name = "Ice Skate Deathmatch",
 	author = "Ethorbit",
 	description = "Greatly changes the way deathmatch is played introducing new techniques & perks",
-	version = "1.3.6",
+	version = "1.4.0",
 	url = ""
 }
 
@@ -168,7 +168,30 @@ public void OnPluginStart() { // OnMapStart() will not be called by just simply 
     ISDM_Initialize();
 }
 
-public void ISDM_Initialize() {
+public void OnPluginEnd() 
+{
+    RemoveISDM();
+}
+
+public void OnMapEnd()
+{
+    RemoveISDM();
+}
+
+void RemoveISDM() // Reset the server back to normal like the plugin was never loaded before
+{
+    SetConVarInt(FindConVar("sv_footsteps"), 1, false, false);
+    SetConVarInt(FindConVar("sv_friction"), 4, false, false); 
+    SetConVarFloat(FindConVar("sv_accelerate"), 10.0, false, false); 
+    SetConVarFloat(FindConVar("sv_airaccelerate"), 10.0, false, false); 
+    SetConVarFloat(FindConVar("phys_timescale"), 1.0, false, false); 
+    SetConVarFloat(FindConVar("physcannon_minforce"), 700.0, false, false); 
+    SetConVarFloat(FindConVar("physcannon_maxforce"), 1500.0, false, false);
+    SetConVarFloat(FindConVar("physcannon_pullforce"), 4000.0, false, false);
+}
+
+void ISDM_Initialize() 
+{
     ISDM_MaxPlayers = GetMaxClients(); 
     SetConVarInt(FindConVar("sv_footsteps"), 0, false, false); // Footstep sounds are replaced with skating sounds
     SetConVarFloat(FindConVar("sv_friction"), 0.5, false, false); // No other way found so far to allow players to slide :(
@@ -232,13 +255,13 @@ public void ISDM_Initialize() {
     }
 }
 
-public void ISDM_DelFromArray(Handle:array, item) {
+void ISDM_DelFromArray(Handle:array, item) {
     if (FindValueInArray(array, item) > -1) {
         RemoveFromArray(array, FindValueInArray(array, item));
     }
 }
 
-public OnGameFrame() {
+public void OnGameFrame() {
     for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
         if (IsValidEntity(i)) {
             if (IsClientInGame(i)) {  
@@ -263,7 +286,7 @@ public OnGameFrame() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// ISDM DAMAGE LOGIC /////////////////////////////////
-ISDM_DealDamage(victim, damage, attacker=0, damageType=DMG_GENERIC, String:weapon[]="") {
+void ISDM_DealDamage(victim, damage, attacker=0, damageType=DMG_GENERIC, String:weapon[]="") {
 	if (IsValidEntity(victim) && IsValidEntity(attacker) && IsPlayerAlive(victim)) {
 		new String:DmgString[16];
 		new String:DmgTypeString[32];
@@ -290,14 +313,6 @@ ISDM_DealDamage(victim, damage, attacker=0, damageType=DMG_GENERIC, String:weapo
 	}
 }
 
-public void ShowAllEnts() {
-    for (new i = 0; i < GetMaxEntities(); i++) {
-        if (IsValidEntity(i)) {
-            new String:EntClass[32];
-            GetEntityClassname(i, EntClass, 32);
-        }
-    }
-}
 public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &damagetype) {
     // Allow trigger_hurt entities to still kill players regardless of the conditions set later on:
     if (IsValidEntity(inflictor)) { 
@@ -441,7 +456,7 @@ public Action:ISDM_GroundCheck(Handle:timer, any:client) { // Gives the boosting
     }
 }
 
-public ISDM_BoostPlayer(client, String:Weapon[]) {
+public void ISDM_BoostPlayer(client, String:Weapon[]) {
     if (IsPlayerAlive(client)) {
         new Float:PlyVel[3];
         GetEntPropVector(client, Prop_Data, "m_vecVelocity", PlyVel);
@@ -578,7 +593,7 @@ stock ISDM_IncreaseFire(client, Float:Amount) {
 	}
 }
 
-public bool:SearchForWep(String:WepName[32]) { 
+bool SearchForWep(String:WepName[32]) { 
     bool Found = false;
 
     for (new i = 0; i < sizeof(TheRightWeapons); i++) {
@@ -599,7 +614,7 @@ public Action:ISDM_ForceReload(Handle:timer, any:client) { // A timed timer to f
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////// ISDM PROP STUFF //////////////////////////////////////
-public void ISDM_CreateWaterEnt(client) {
+void ISDM_CreateWaterEnt(client) {
     new String:PropName[32];
     new Float:currentPos[3];
     GetClientAbsOrigin(client, currentPos);
@@ -623,7 +638,7 @@ public void ISDM_CreateWaterEnt(client) {
 }
 
 // Finds the water prop by its targetname:
-public ISDM_WaterProp(client) { 
+int ISDM_WaterProp(client) { 
     int WaterProp = -1;
     
     for (new i = 0; i <= GetMaxEntities(); i++) {
@@ -642,7 +657,7 @@ public ISDM_WaterProp(client) {
     return WaterProp;
 }
 
-public void ISDM_DeleteWaterProp(client) {
+void ISDM_DeleteWaterProp(client) {
     for (new i = 0; i <= GetMaxEntities(); i++) {
         if (IsValidEntity(i)) {
             new String:Targetname[32];
@@ -656,7 +671,7 @@ public void ISDM_DeleteWaterProp(client) {
     }
 }
 
-public ISDM_HitWorld(client) { // This trace will ensure that the 'Water Prop' isn't attached below the player when they aren't even above water
+float ISDM_HitWorld(client) { // This trace will ensure that the 'Water Prop' isn't attached below the player when they aren't even above water
     new Float:hitPos[3] = {0.0, 0.0, 0.0};
 
     new Float:EyePos[3];
@@ -1130,12 +1145,11 @@ int CHAN_AUTO = 0;
 int SNDLVL_NORM = 75;
 
 public Action:ISDM_StopSounds(Handle:timer, any:client) { // These are the sounds that are replaced/unwanted
-    PrintToServer("Stopping sounds");
     StopSound(client, CHAN_AUTO, "player/pl_fallpain1.wav");
     StopSound(client, CHAN_AUTO, "player/pl_fallpain3.wav");
 }
 
-public ISDM_MuteSkateSounds(client) { // Stops emitting ice skate sounds from a client
+void ISDM_MuteSkateSounds(client) { // Stops emitting ice skate sounds from a client
     new String:SkateSounds[][] = {"skate01", "skate02", "skate03"};
     for (new i = 0; i < sizeof(SkateSounds); i++) {
         new String:SoundFile[58];
@@ -1146,7 +1160,7 @@ public ISDM_MuteSkateSounds(client) { // Stops emitting ice skate sounds from a 
     }    
 }
 
-public ISDM_ImpactSound(client) { // Replaces the fall damage sound with the new ice one
+void ISDM_ImpactSound(client) { // Replaces the fall damage sound with the new ice one
     new String:RandomImpact[][] = {"impact01.wav", "impact02.wav"};
     new String:SoundName[40];
     int RandomIndex = GetRandomInt(0, 1); 
@@ -1155,7 +1169,7 @@ public ISDM_ImpactSound(client) { // Replaces the fall damage sound with the new
     EmitSoundToAll(SoundName, client, CHAN_AUTO, SNDLVL_NORM, _, 1.0, _, _, _, _, _, _); // Plays the ice impact sound 
 }
 
-public ISDM_SkateSound(client) { // Plays a random ice skate sound for skating players
+void ISDM_SkateSound(client) { // Plays a random ice skate sound for skating players
     if (!IsValidHandle(TimeForSkateSound[client])) { // If a skate sound isn't already in progress
         new String:RandomSound[][] = {"skate01", "skate02", "skate03"};
         new String:SoundName[40];
@@ -1219,11 +1233,11 @@ public Action:ISDM_AddDirection(Handle:timer, any:client) {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////// ISDM PERK STUFF ////////////////////////////////
-public void ISDM_PerkChanged(Handle:convar, const String:oldValue[], const String:newValue[]) {
+void ISDM_PerkChanged(Handle:convar, const String:oldValue[], const String:newValue[]) {
     ISDM_UpdatePerkVars();
 }
 
-public void ISDM_UpdatePerkVars() {
+void ISDM_UpdatePerkVars() {
     MAXSLOWSPEED = GetConVarFloat(FindConVar("ISDM_SlowPerkSpeed"));
     SPEED1SPEED = GetConVarFloat(FindConVar("ISDM_FastPerk1Speed"));
     SPEED2SPEED = GetConVarFloat(FindConVar("ISDM_FastPerk2Speed"));
@@ -1231,7 +1245,7 @@ public void ISDM_UpdatePerkVars() {
     MAXAIRHEIGHT = GetConVarFloat(FindConVar("ISDM_AirPerkHeight"));
 }
 
-public void ISDM_RenderPerk(client, String:perkname[60], direction) {
+void ISDM_RenderPerk(client, String:perkname[60], direction) {
     if (strcmp(RenderedMaterial[client], perkname, true) != 0) {
         new String:Cmd[60];
 
@@ -1252,7 +1266,7 @@ public void ISDM_RenderPerk(client, String:perkname[60], direction) {
     }
 }
 
-public void ISDM_UpdatePerks(client) {
+void ISDM_UpdatePerks(client) {
     if (IsValidEntity(client)) {
         bool Only1SpeedPerk = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk1]) && !ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]));
         bool Only2SpeedPerks = (ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk2]) && !ISDM_GetPerk(client, ISDM_Perks[ISDM_SpeedPerk3]));
@@ -1263,6 +1277,10 @@ public void ISDM_UpdatePerks(client) {
         bool OnlyAirPerk = (ISDM_GetPerk(client, ISDM_Perks[ISDM_AirPerk]) && !Only1SpeedPerk && !Only2SpeedPerks && !AllSpeedPerks && !Speed1AndAir && !Speed2AndAir && !Speed3AndAir)
 
         //////////// Perk player colors /////////////////////
+        if (ISDM_GetPerk(client, ISDM_Perks[ISDM_NoPerks])) {
+            SetEntityRenderColor(client, 255, 255, 255, 255); 
+        }
+
         if (ISDM_GetPerk(client, ISDM_Perks[ISDM_AirPerk])) {
             SetEntityRenderColor(client, 234, 0, 0, 255); 
         }
@@ -1442,20 +1460,20 @@ public void ISDM_UpdatePerks(client) {
 
 public Action:ISDM_DoNothing(Handle:timer, any:client) {}
 
-public void ISDM_AddPerk(client, Handle:array) {
+void ISDM_AddPerk(client, Handle:array) {
     if (FindValueInArray(array, client) < 0) { 
         PushArrayCell(array, client);
         ClientCommand(client, "r_screenoverlay 0");
     } 
 }
 
-public void ISDM_RemovePerk(client, Handle:array) {
+void ISDM_RemovePerk(client, Handle:array) {
     if (FindValueInArray(array, client) > -1) { 
         ISDM_DelFromArray(array, FindValueInArray(array, client));
     }
 }
 
-public ISDM_GetPerk(client, perk) {
+bool ISDM_GetPerk(client, perk) {
     bool HasPerk;
     if (FindValueInArray(perk, client) > -1) {
         HasPerk = true;
@@ -1576,3 +1594,8 @@ public Action:GetClosestPlyToProj(Handle:timer, any:entity) { // Calculates the 
     }
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Admin Menu 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
