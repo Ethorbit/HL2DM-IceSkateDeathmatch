@@ -1133,7 +1133,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             } 
             
             if (GetEntPropFloat(client, Prop_Data, "m_flMaxspeed") == 190.0) { 
-               // SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
+               SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
             }
 
             if (buttons & IN_JUMP) {
@@ -1304,21 +1304,13 @@ public Action:ISDM_IncrementSkate(Handle:timer, any:client)
                 }
             }
         } 
-        // else if (PlyTouchingWaterProp[client] == true) // They are sliding on water, make them skate slightly faster
-        // { 
-        //     if (PlySkates[client] < 8) // Give them an easy chance to skate fast
-        //     { 
-        //         PlySkates[client] = PlySkates[client] + SPEEDSCALE + 0.5;
-        //     } 
-        //     else if (PlySkates[client] < 20) 
-        //     {
-        //         PlySkates[client] = PlySkates[client] + SPEEDSCALE; // They are pretty fast now, start adding normal speed boosts
-        //     } 
-        //     else 
-        //     {
-        //         PlySkates[client] = PlySkates[client] + SPEEDSCALE; // They are going super fast, add smaller speed boosts
-        //     } 
-        // }
+        else if (PlyTouchingWaterProp[client] == true) // They are sliding on water, make them skate slightly faster
+        { 
+            if (PlySkates[client] < SPEEDSCALE * 10.0) // Give a speed boost (The higher speed scale is the more powerful this boost is)
+            {
+                PlySkates[client] += SPEEDSCALE + 2;
+            }
+        }
     }
 }
 
