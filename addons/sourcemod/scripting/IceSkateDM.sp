@@ -406,11 +406,8 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
     }
 
     if (damagetype & DMG_FALL) { // Disable disgusting fall damage
-        if (StoppingSounds[victim] == INVALID_HANDLE) {
-            StoppingSounds[victim] = CreateTimer(0.0, ISDM_StopSounds, victim);
-            ISDM_ImpactSound(victim); // Function to replace the fall damage sound
-        }
-
+        StoppingSounds[victim] = CreateTimer(0.0, ISDM_StopSounds, victim);
+        ISDM_ImpactSound(victim); // Function to replace the fall damage sound
         damage = 0.0;
         return Plugin_Changed;
     }
@@ -1125,7 +1122,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             } 
             
             if (GetEntPropFloat(client, Prop_Data, "m_flMaxspeed") == 190.0) { 
-                //SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
+                SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
             }
 
             if (buttons & IN_JUMP) {
@@ -1921,17 +1918,24 @@ void ISDM_SpeedScaleMenu(int client, bool isVoting) // Display wide range of spe
     if (isVoting)
     {
         menu.SetTitle("Vote Speed Scale");
+
+        for (float i = 0.1; i <= 1.1; i += 0.1)
+        {
+            char selectName[50];
+            Format(selectName, 50, "%.1f", i);
+            menu.AddItem("ISDM_SpeedScale", selectName);
+        }
     }
     else
     {
         menu.SetTitle("Save Speed Scale for map");
-    }
 
-    for (float i = 0.1; i <= 15.1; i += 0.1)
-    {
-        char selectName[50];
-        Format(selectName, 50, "%.1f", i);
-        menu.AddItem("ISDM_SpeedScale", selectName);
+        for (float i = 0.1; i <= 2.1; i += 0.1) // Let admins have the ability to change scale past maximum allowed
+        {
+            char selectName[50];
+            Format(selectName, 50, "%.1f", i);
+            menu.AddItem("ISDM_SpeedScale", selectName);
+        }
     }
 
     menu.ExitButton = true;
