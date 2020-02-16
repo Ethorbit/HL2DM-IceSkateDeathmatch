@@ -99,6 +99,41 @@ float SPEED2SPEED;
 float SPEED3SPEED;
 float SPEEDSCALE;
 
+float EstimateMapSize() // Get an estimation of how big the map is in case a speed scale has not yet been manually saved for the map
+{
+    float distances = 0.0;
+    float point1[3], point2[3];
+
+    // Continuously chain spawn point entities together & add all their distances:
+    for (int i = 0; i < 2048; i++)
+    {
+        char clsname[300];
+        if (IsValidEntity(i))
+        {
+            GetEntityClassname(i, clsname, sizeof(clsname));
+
+            if (StrContains(clsname, "player_start"))
+            {
+                if (point1[0] < 1.0 && point1[1] < 1.0 && point1[2] < 1.0)
+                {
+                    GetEntPropVector(i, Prop_Data, "m_vecOrigin", point1);
+                }
+                else
+                {
+                    GetEntPropVector(i, Prop_Data, "m_vecOrigin", point2);
+                    distances += GetVectorDistance(point1, point2);
+
+                    point1[0] = point2[0];
+                    point1[1] = point2[1];
+                    point1[2] = point2[2];
+                }
+            }
+        }
+    }
+
+    return distances;
+}
+
 new String:TheRightWeapons[][] = { // Weapons that will have their fire speeds (not reload speeds) modified by speed perks
     "weapon_357", 
     "weapon_crowbar", 
@@ -166,7 +201,8 @@ public void OnMapStart() { // OnPluginStart() does NOT run every map change resu
 
 public void OnPluginStart() { // OnMapStart() will not be called by just simply reloading the plugin
     RegConsoleCmd("ISDM", ISDM_Menu);
-    RegAdminCmd("ISDM_Toggle", ISDM_Toggle, ADMFLAG_BAN, "Toggle on/off the Ice Skate Deathmatch gamemode at run-time");
+    RegAdminCmd("ISDM_Toggle", ISDM_Toggle, ADMFLAG_BAN, "Toggle on/off the Ice Skate Deathmatch gamemode at run-time.");
+    RegAdminCmd("ISDM_AutoSpeed", ISDM_AutoSpeeds, ADMFLAG_BAN, "Reset skate speed for the current map to the automated values.");
     ISDM_Initialize();
 }
 
@@ -206,7 +242,7 @@ void RemoveISDM() // Reset the server back to normal like the plugin was never l
 void ISDM_SetConVars()
 {
     SetConVarInt(FindConVar("sv_footsteps"), 0, false, false); // Footstep sounds are replaced with skating sounds
-    SetConVarFloat(FindConVar("sv_friction"), 0.5, false, false); // No other way found so far to allow players to slide :(
+    SetConVarFloat(FindConVar("sv_friction"), 0.8, false, false); // No other way found so far to allow players to slide :(
     SetConVarFloat(FindConVar("sv_accelerate"), 100.0, false, false); // Very much optional, playable without it
     SetConVarFloat(FindConVar("sv_airaccelerate"), 9999.0, false, false); // Based on feedback airaccelerate is the more popular option over what was used
     SetConVarFloat(FindConVar("phys_timescale"), 2.0, false, false); // A necessity because of how fast players can go now
@@ -305,7 +341,7 @@ public void OnGameFrame() {
     }
 }
 
-void ISDM_NewSpeedScale(Handle:convar, const String:oldValue[], const String:newValue[])  // Will auto change based on map-saved speed scales
+void ISDM_NewSpeedScale(Handle:convar, const String:oldValue[], const String:newValue[])  // Will auto change based on map-saved/auto-saved speed scales
 {
     SPEEDSCALE = GetConVarFloat(FindConVar("ISDM_SpeedScale"));
 }
@@ -1112,7 +1148,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
 
                 if (ElapsedLeftTime[client] > 2 || ElapsedRightTime[client] > 2) { // They have let go of the skate keys for too long, make them lose speed
                     if (PlySkates[client] > 0) {
-                        PlySkates[client]--;
+                        PlySkates[client] = 0.0;
                     }
                 }
 
@@ -1237,28 +1273,74 @@ void ISDM_SkateSound(client) { // Plays a random ice skate sound for skating pla
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////// ISDM SKATE LOGIC //////////////////////////////////
-public Action:ISDM_IncrementSkate(Handle:timer, any:client) {
+public Action:ISDM_IncrementSkate(Handle:timer, any:client) 
+{
     if (!ISDMEnabled) return Plugin_Continue;
     
-    if (IsValidEntity(client)) {   
+    if (IsValidEntity(client)) 
+    {   
         if (GetClientButtons(client) & 1 << 9 && GetClientButtons(client) & 1 << 10 ) {
-        } else if (PlyTouchingWaterProp[client] == false) {    
-            if (PlySkates[client] < 8) { // Give them an easy chance to skate fast
-                PlySkates[client] = PlySkates[client] + 2;
-            } else if (PlySkates[client] < 20) {
-                PlySkates[client]++; // They are pretty fast now, start adding normal speed boosts
-            } else {
-                PlySkates[client] = PlySkates[client] + 0.5; // They are going super fast, add smaller speed boosts
-            }   
-        } else if (PlyTouchingWaterProp[client] == true) { // They are sliding on water, make them skate slightly faster
-            if (PlySkates[client] < 8) { // Give them an easy chance to skate fast
-                PlySkates[client] = PlySkates[client] + 4;
-            } else if (PlySkates[client] < 20) {
-                PlySkates[client] = PlySkates[client] + 2; // They are pretty fast now, start adding normal speed boosts
-            } else {
-                PlySkates[client] = PlySkates[client]++; // They are going super fast, add smaller speed boosts
-            } 
-        }
+        } else if (PlyTouchingWaterProp[client] == false) 
+        {    
+            // if (PlySkates[client] < 8) 
+            // { // Give them an easy chance to skate fast
+            //     PlySkates[client] += SPEEDSCALE;
+            // } 
+            
+            // if (PlySkates[client] > 20 && PlySkates[client] < SPEEDSCALE * 100.0 / 2) 
+            // {
+            //     PlySkates[client] = PlySkates[client] + SPEEDSCALE / 2; // They are going super fast, add smaller speed boosts
+            // }   
+            
+            // if (PlySkates[client] >= (SPEEDSCALE * 10.0 / 2))
+            // {
+
+                if (PlySkates[client] < SPEEDSCALE * 10.0)
+                {
+                    PlySkates[client] += SPEEDSCALE;
+                }
+                
+                if (PlySkates[client] >= SPEEDSCALE * 20.0)
+                {
+                    float equation = PlySkates[client] / SPEEDSCALE;
+                    if (equation > 0.0)
+                    {
+                        PlySkates[client] -= SPEEDSCALE;
+                    }
+                    // else
+                    // {
+                    //     PlySkates[client] -= SPEEDSCALE;
+                    // }
+                  
+                    PrintToChatAll("%f", PlySkates[client]);
+                }
+
+            //}
+            // if (PlySkates[client] > (SPEEDSCALE * 49.0) / 2 && PlySkates[client] < SPEEDSCALE * 49.0)
+            // {
+            //     PlySkates[client] = PlySkates[client] + SPEEDSCALE / 4;
+            // }
+
+            // if (PlySkates[client] > SPEEDSCALE * 49.0)
+            // {
+            //     PlySkates[client] += 0.01;
+            // }
+        } 
+        // else if (PlyTouchingWaterProp[client] == true) // They are sliding on water, make them skate slightly faster
+        // { 
+        //     if (PlySkates[client] < 8) // Give them an easy chance to skate fast
+        //     { 
+        //         PlySkates[client] = PlySkates[client] + SPEEDSCALE + 0.5;
+        //     } 
+        //     else if (PlySkates[client] < 20) 
+        //     {
+        //         PlySkates[client] = PlySkates[client] + SPEEDSCALE; // They are pretty fast now, start adding normal speed boosts
+        //     } 
+        //     else 
+        //     {
+        //         PlySkates[client] = PlySkates[client] + SPEEDSCALE; // They are going super fast, add smaller speed boosts
+        //     } 
+        // }
     }
 }
 
@@ -1674,8 +1756,46 @@ public Action:GetClosestPlyToProj(Handle:timer, any:entity) { // Calculates the 
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Admin Commands: 
+// Admin Commands & Menus: 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+stock bool ClientIsAdmin(int client)
+{
+    bool isPlyAdmin = false;
+   
+    if (IsValidEntity(client && IsClientInGame(client)))
+    {
+        AdminId adminid = GetUserAdmin(client);
+        if (adminid.HasFlag(ADMFLAG_BAN, Access_Effective))
+        {
+            isPlyAdmin = true;
+        }
+    }
+
+    return isPlyAdmin;
+}
+
+void ISDM_SetAutoSpeed()
+{
+    float estSize = EstimateMapSize();
+
+    // Don't allow auto speeds to be too slow/fast:
+    float equation = (estSize / 100000.0) / 4.0;
+    equation = (equation < 0.1) ? 0.1 : equation;
+    equation = (equation > 1.0) ? 1.0 : equation;
+
+    SPEEDSCALE = equation;
+
+    PrintToChatAll("Automatically set skating speed scale to: %.2f based off the map's estimated size (%.2f).", SPEEDSCALE, estSize / 100.0);
+}
+
+Action:ISDM_AutoSpeeds(int client, int args)
+{
+    if (ClientIsAdmin(client))
+    {
+        ISDM_SetAutoSpeed();
+    }
+}
+
 Action:ISDM_Toggle(int client, int args) // Toggle on/off gamemode from the gamemode's menu or console/chat
 {
     bool enableIt = !ISDMEnabled;
@@ -1717,6 +1837,9 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2) // Adm
 
         if (IsValidEntity(param1) && IsClientInGame(param1))
         {
+
+            bool isPlyAdmin = ClientIsAdmin(param1);
+            
             if (StrEqual(info, "ISDM_VoteSpeed"))
             {
                 ISDM_SpeedScaleMenu(param1, true);
@@ -1726,21 +1849,17 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2) // Adm
             {
                 ISDM_SpeedScaleMenu(param1, false);
             }
+
+            if (StrEqual(info, "ISDM_AutoSpeed"))
+            {
+                ISDM_AutoSpeeds(param1, 0);
+            }
         }
     }
 
     if (action == MenuAction_DrawItem)
     {   
-        bool isPlyAdmin = false;
-
-        if (IsValidEntity(param1 && IsClientInGame(param1)))
-        {
-            AdminId adminid = GetUserAdmin(param1);
-            if (adminid.HasFlag(ADMFLAG_BAN, Access_Effective))
-            {
-                isPlyAdmin = true;
-            }
-        }
+        bool isPlyAdmin = ClientIsAdmin(param1);
 
         int style;
         char info[32];
@@ -1748,7 +1867,7 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2) // Adm
 
         if (!isPlyAdmin) // Hide administrator items from regular users
         {
-            if (StrEqual(info, "ISDM_Toggle") || StrEqual(info, "ISDM_SpeedScale"))
+            if (StrEqual(info, "ISDM_Toggle") || StrEqual(info, "ISDM_SpeedScale") || StrEqual(info, "ISDM_AutoSpeed"))
             {
                 return ITEMDRAW_DISABLED;
             }
@@ -1778,11 +1897,17 @@ public int ISDMSpeedScaleMenu(Menu menu, MenuAction action, int param1, int para
 
 }
 
+public int ISDMSpeedScaleMenuVote(Menu menu, MenuAction action, int param1, int param2)
+{
+
+}
+
 Action:ISDM_Menu(int client, int args) // Show gamemode's menu to user
 {
     Menu menu = new Menu(ISDMMenu, MENU_ACTIONS_ALL);
     menu.SetTitle("Ice Skate Deathmatch", LANG_SERVER);
     menu.AddItem("ISDM_Toggle", "Toggle ISDM");
+    menu.AddItem("ISDM_AutoSpeed", "Auto Speed Scale");
     menu.AddItem("ISDM_SpeedScale", "Set Speed Scale");
     menu.AddItem("ISDM_VoteSpeed", "Vote Speed Scale");
     menu.ExitButton = true;
