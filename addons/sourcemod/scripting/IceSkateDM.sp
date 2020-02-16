@@ -344,6 +344,17 @@ public void OnGameFrame() {
 void ISDM_NewSpeedScale(Handle:convar, const String:oldValue[], const String:newValue[])  // Will auto change based on map-saved/auto-saved speed scales
 {
     SPEEDSCALE = GetConVarFloat(FindConVar("ISDM_SpeedScale"));
+    SetConVarFloat(FindConVar("phys_timescale"), 1.0 + SPEEDSCALE, false, false); // A necessity because of how fast players can go now
+    
+    // Reset the skate amount as this cmd can really screw 
+    // things up when changing from super high value to low:
+    for (int i = 0; i <= ISDM_MaxPlayers; i++)
+    {
+        if (IsValidEntity(i) && IsClientConnected(i))
+        {
+            PlySkates[i] = 0.0;
+        }
+    }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -497,7 +508,7 @@ public Action:ISDM_Touched(entity, entity2) {
                     }
                 }
             }
-        } else if (strcmp(EntClass, "player") == 0) { // They are both not players
+        } else if (strcmp(EntClass, "player") == 0) { // Only 1 is a player
             new String:Targetname[32];
             GetEntPropString(entity2, Prop_Data, "m_iName", Targetname, 32);
 
@@ -1122,7 +1133,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             } 
             
             if (GetEntPropFloat(client, Prop_Data, "m_flMaxspeed") == 190.0) { 
-                SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
+               // SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
             }
 
             if (buttons & IN_JUMP) {
@@ -1279,49 +1290,19 @@ public Action:ISDM_IncrementSkate(Handle:timer, any:client)
         if (GetClientButtons(client) & 1 << 9 && GetClientButtons(client) & 1 << 10 ) {
         } else if (PlyTouchingWaterProp[client] == false) 
         {    
-            // if (PlySkates[client] < 8) 
-            // { // Give them an easy chance to skate fast
-            //     PlySkates[client] += SPEEDSCALE;
-            // } 
+            if (PlySkates[client] < SPEEDSCALE * 10.0) // Give a speed boost (The higher speed scale is the more powerful this boost is)
+            {
+                PlySkates[client] += SPEEDSCALE;
+            }
             
-            // if (PlySkates[client] > 20 && PlySkates[client] < SPEEDSCALE * 100.0 / 2) 
-            // {
-            //     PlySkates[client] = PlySkates[client] + SPEEDSCALE / 2; // They are going super fast, add smaller speed boosts
-            // }   
-            
-            // if (PlySkates[client] >= (SPEEDSCALE * 10.0 / 2))
-            // {
-
-                if (PlySkates[client] < SPEEDSCALE * 10.0)
+            if (PlySkates[client] >= SPEEDSCALE * 20.0) // They've passed the speed multiplier's max speed
+            {
+                float equation = PlySkates[client] / SPEEDSCALE;
+                if (equation > 0.0)
                 {
-                    PlySkates[client] += SPEEDSCALE;
+                    PlySkates[client] -= SPEEDSCALE;
                 }
-                
-                if (PlySkates[client] >= SPEEDSCALE * 20.0)
-                {
-                    float equation = PlySkates[client] / SPEEDSCALE;
-                    if (equation > 0.0)
-                    {
-                        PlySkates[client] -= SPEEDSCALE;
-                    }
-                    // else
-                    // {
-                    //     PlySkates[client] -= SPEEDSCALE;
-                    // }
-                  
-                    PrintToChatAll("%f", PlySkates[client]);
-                }
-
-            //}
-            // if (PlySkates[client] > (SPEEDSCALE * 49.0) / 2 && PlySkates[client] < SPEEDSCALE * 49.0)
-            // {
-            //     PlySkates[client] = PlySkates[client] + SPEEDSCALE / 4;
-            // }
-
-            // if (PlySkates[client] > SPEEDSCALE * 49.0)
-            // {
-            //     PlySkates[client] += 0.01;
-            // }
+            }
         } 
         // else if (PlyTouchingWaterProp[client] == true) // They are sliding on water, make them skate slightly faster
         // { 
@@ -1780,8 +1761,7 @@ void ISDM_SetAutoSpeed()
     equation = (equation < 0.1) ? 0.1 : equation;
     equation = (equation > 1.0) ? 1.0 : equation;
 
-    SPEEDSCALE = equation;
-
+    SetConVarFloat(ISDM_Speedscale, equation, false, false);
     PrintToChatAll("Automatically set skating speed scale to: %.2f based off the map's estimated size (%.2f).", SPEEDSCALE, estSize / 100.0);
 }
 
