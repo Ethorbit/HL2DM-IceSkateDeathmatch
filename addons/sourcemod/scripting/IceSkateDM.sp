@@ -1,7 +1,8 @@
 // Ice Skate Deathmatch is a thing now thanks to Himanshu's choice of commands :)
 // TODO: 
-// 2. Add gamemode info somehow 
-// 8. Fix gun noises from cutting off from the fast firing code
+// 1. Add gamemode info somehow 
+// 2. Fix gun noises from cutting off from the fast firing code
+// 3. Fix fall sound from cutting off
 
 public Plugin:myinfo =
 {
@@ -15,6 +16,7 @@ public Plugin:myinfo =
 #include <sdktools>
 #include <sdkhooks>
 #include <convars>
+#include <clientprefs>
 
 new String:ISDM_Materials[][63] = { // The materials the gamemode uses
     "1speedperk", 
@@ -78,6 +80,8 @@ new Handle:RenderingMat[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:StoppingSounds[MAXPLAYERS + 1] = INVALID_HANDLE;
 new Handle:ForceReloading[MAXPLAYERS + 1] = false;
 new Handle:ISDM_Speedscale = INVALID_HANDLE;
+new Handle:ISDM_ToggleMat = INVALID_HANDLE;
+new Handle:ISDM_SndCookie = INVALID_HANDLE;
 int ElapsedLeftTime[MAXPLAYERS + 1] = 0;
 int ElapsedRightTime[MAXPLAYERS + 1] = 0;
 float PlySkates[MAXPLAYERS + 1] = 0.0;
@@ -203,7 +207,26 @@ public void OnPluginStart() { // OnMapStart() will not be called by just simply 
     RegConsoleCmd("ISDM", ISDM_Menu);
     RegAdminCmd("ISDM_Toggle", ISDM_Toggle, ADMFLAG_BAN, "Toggle on/off the Ice Skate Deathmatch gamemode at run-time.");
     RegAdminCmd("ISDM_AutoSpeed", ISDM_AutoSpeeds, ADMFLAG_BAN, "Reset skate speed for the current map to the automated values.");
+    ISDM_ToggleMat = RegClientCookie("ISDM_ToggleMats", "Toggle on/off the rendering of Ice Skate Deathmatch materials.", CookieAccess_Public);
+    ISDM_SndCookie = RegClientCookie("ISDM_ToggleSounds", "Toggle on/off the ice skating sounds for Ice Skate Deathmatch.", CookieAccess_Public);
     ISDM_Initialize();
+}
+
+public void OnClientConnected(int client)
+{
+    char matCookie[5], sndCookie[5];
+    GetClientCookie(client, ISDM_ToggleMat, matCookie, 5);
+    GetClientCookie(client, ISDM_SndCookie, sndCookie, 5);
+
+    if (!StrEqual(matCookie, "true") && !StrEqual(matCookie, "false"))
+    {
+        SetClientCookie(client, ISDM_ToggleMat, "true");
+    }
+
+    if (!StrEqual(sndCookie, "true") && !StrEqual(sndCookie, "false"))
+    {
+        SetClientCookie(client, ISDM_SndCookie, "true");
+    }
 }
 
 public void OnPluginEnd() 
@@ -261,15 +284,15 @@ void ISDM_Initialize()
     ISDM_PerkVars[FastPerk3SpeedConVar] = CreateConVar("ISDM_FastPerk3Speed", "1500.0", "The maximum speed players can go to get Fast Perk #3", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_PerkVars[AirPerkHeightConVar] = CreateConVar("ISDM_AirPerkHeight", "50.0", "The minimum height speed players need to go before they get Air Perk", FCVAR_SERVER_CAN_EXECUTE);
     ISDM_Speedscale = CreateConVar("ISDM_SpeedScale", "1.0", "The multiplier for the speed players gain from ice skating", FCVAR_SERVER_CAN_EXECUTE);
-    //AddCommandListener(ISDM_Toggle, "ISDM");
+    AddNormalSoundHook(NormalSHook:ISDM_SndHook);
     ISDM_UpdatePerkVars();
 
     for (new i = 0; i < sizeof(ISDM_Materials); i++) { // Loop through all Ice Skate Deathmatch materials and force clients to download them
         int MaxMatLength = 58;
         new String:VTFs[MaxMatLength];
         new String:VMTs[MaxMatLength];
-        Format(VTFs, MaxMatLength, "materials/IceSkateDM/%s.vtf", ISDM_Materials[i]);
-        Format(VMTs, MaxMatLength, "materials/IceSkateDM/%s.vmt", ISDM_Materials[i]);
+        Format(VTFs, MaxMatLength, "materials/iceskatedm/%s.vtf", ISDM_Materials[i]);
+        Format(VMTs, MaxMatLength, "materials/iceskatedm/%s.vmt", ISDM_Materials[i]);
         AddFileToDownloadsTable(VTFs);
         AddFileToDownloadsTable(VMTs);
     }
@@ -277,17 +300,17 @@ void ISDM_Initialize()
     for (new i = 0; i < sizeof(ISDM_Sounds); i++) { // Loop through sounds and force downloads too
         int MaxMatLength = 32;
         new String:Sounds[MaxMatLength];
-        Format(Sounds, MaxMatLength, "sound/IceSkateDM/%s.wav", ISDM_Sounds[i]);
+        Format(Sounds, MaxMatLength, "sound/iceskatedm/%s.wav", ISDM_Sounds[i]);
         AddFileToDownloadsTable(Sounds);
         PrecacheSound(Sounds);
     }
 
-    AddFileToDownloadsTable("models/IceSkateDM/WaterProp.mdl");
-    AddFileToDownloadsTable("models/IceSkateDM/WaterProp.phy");
-    AddFileToDownloadsTable("models/IceSkateDM/WaterProp.dx80.vtx");
-    AddFileToDownloadsTable("models/IceSkateDM/WaterProp.dx90.vtx");
-    AddFileToDownloadsTable("models/IceSkateDM/WaterProp.sw.vtx");
-    AddFileToDownloadsTable("models/IceSkateDM/WaterProp.vvd");
+    AddFileToDownloadsTable("models/iceskatedm/WaterProp.mdl");
+    AddFileToDownloadsTable("models/iceskatedm/WaterProp.phy");
+    AddFileToDownloadsTable("models/iceskatedm/WaterProp.dx80.vtx");
+    AddFileToDownloadsTable("models/iceskatedm/WaterProp.dx90.vtx");
+    AddFileToDownloadsTable("models/iceskatedm/WaterProp.sw.vtx");
+    AddFileToDownloadsTable("models/iceskatedm/WaterProp.vvd");
 
     new const perkvar[5] = {SlowPerkSpeedConVar, FastPerk1SpeedConVar, FastPerk2SpeedConVar, FastPerk3SpeedConVar, AirPerkHeightConVar}; 
     for (new i = 0; i < sizeof(perkvar); i++) { // Loop through each perk convar and hook it to the ISDM_PerkChanged() function
@@ -416,9 +439,7 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
         return Plugin_Changed;  
     }
 
-    if (damagetype & DMG_FALL) { // Disable disgusting fall damage
-        StoppingSounds[victim] = CreateTimer(0.0, ISDM_StopSounds, victim);
-        ISDM_ImpactSound(victim); // Function to replace the fall damage sound
+    if (damagetype & DMG_FALL) { // Disable disgusting fall damage     
         damage = 0.0;
         return Plugin_Changed;
     }
@@ -1133,7 +1154,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             } 
             
             if (GetEntPropFloat(client, Prop_Data, "m_flMaxspeed") == 190.0) { 
-               SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
+               //SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
             }
 
             if (buttons & IN_JUMP) {
@@ -1255,20 +1276,40 @@ void ISDM_MuteSkateSounds(client) { // Stops emitting ice skate sounds from a cl
     }    
 }
 
-void ISDM_ImpactSound(client) { // Replaces the fall damage sound with the new ice one
-    if (!ISDMEnabled) return;
+public Action:ISDM_SndHook(int[] clients, int& numClients, char sample[130], int& entity, int& channel, float& volume, int& level, int& pitch, int& flags, char[] soundEntry, int& seed)
+{
+    if (StrEqual(sample, "player/pl_fallpain1.wav") || StrEqual(sample, "player/pl_fallpain3.wav"))
+    {
+        new String:RandomImpact[][] = {"impact01.wav", "impact02.wav"};
+        new String:SoundName[40];
+        int RandomIndex = GetRandomInt(0, 1); 
+        Format(SoundName, sizeof(SoundName), "IceSkateDM/%s", RandomImpact[RandomIndex]); // Randomly chooses between impact01 and impact02
+        PrecacheSound(SoundName);
+        sample = SoundName;
+        volume = 1.0;
+        level = SNDLVL_NORM;
+        channel = SNDCHAN_AUTO;
 
-    new String:RandomImpact[][] = {"impact01.wav", "impact02.wav"};
-    new String:SoundName[40];
-    int RandomIndex = GetRandomInt(0, 1); 
-    Format(SoundName, sizeof(SoundName), "IceSkateDM/%s", RandomImpact[RandomIndex]); // Randomly chooses between impact01 and impact02
-    PrecacheSound(SoundName);
-    EmitSoundToAll(SoundName, client, CHAN_AUTO, SNDLVL_NORM, _, 1.0, _, _, _, _, _, _); // Plays the ice impact sound 
+        //ISDM_ImpactSound(victim); // Function to replace the fall damage sound
+        return Plugin_Changed;
+    }
 }
+
+// void ISDM_ImpactSound(client) { // Replaces the fall damage sound with the new ice one
+//     if (!ISDMEnabled) return;
+
+//     new String:RandomImpact[][] = {"impact01.wav", "impact02.wav"};
+//     new String:SoundName[40];
+//     int RandomIndex = GetRandomInt(0, 1); 
+//     Format(SoundName, sizeof(SoundName), "IceSkateDM/%s", RandomImpact[RandomIndex]); // Randomly chooses between impact01 and impact02
+//     PrecacheSound(SoundName);
+//     EmitSoundToAll(SoundName, client, SNDCHAN_AUTO, SNDLVL_NORM, _, 1.0, _, _, _, _, _, _); // Plays the ice impact sound 
+// }
 
 void ISDM_SkateSound(client) { // Plays a random ice skate sound for skating players
     if (!ISDMEnabled) return;
-    
+    if (!PassToClient(client, ISDM_SndCookie)) return;
+
     if (!IsValidHandle(TimeForSkateSound[client])) { // If a skate sound isn't already in progress
         new String:RandomSound[][] = {"skate01", "skate02", "skate03"};
         new String:SoundName[40];
@@ -1358,9 +1399,33 @@ void ISDM_UpdatePerkVars() {
     MAXAIRHEIGHT = GetConVarFloat(FindConVar("ISDM_AirPerkHeight"));
 }
 
+bool PassToClient(int client, Handle cookie)
+{
+    bool result = false;
+
+    if (IsValidEntity(client) && IsClientInGame(client))
+    {
+        char cookieRes[10];
+        GetClientCookie(client, cookie, cookieRes, 10);
+
+        if (StrEqual(cookieRes, "true"))
+        {
+            result = true;
+        }
+        else
+        {
+            result = false;
+        }
+    }
+
+    return result;
+}
+
+
 void ISDM_RenderPerk(client, String:perkname[60], direction) {
     if (!ISDMEnabled) return;
-    
+    if (!PassToClient(client, ISDM_ToggleMat)) return;
+
     if (strcmp(RenderedMaterial[client], perkname, true) != 0) {
         new String:Cmd[60];
 
@@ -1767,16 +1832,19 @@ Action:ISDM_AutoSpeeds(int client, int args)
 
 Action:ISDM_Toggle(int client, int args) // Toggle on/off gamemode from the gamemode's menu or console/chat
 {
-    bool enableIt = !ISDMEnabled;
-    if (enableIt)
+    if (ClientIsAdmin(client))
     {
-        PrintToChatAll("Ice Skate Deathmatch has been enabled.");
-        CreateTimer(2.0, EnableISDM);
-    }
-    else
-    {
-        PrintToChatAll("Ice Skate Deathmatch has been disabled.");
-        CreateTimer(2.0, DisableISDM);
+        bool enableIt = !ISDMEnabled;
+        if (enableIt)
+        {
+            PrintToChatAll("Ice Skate Deathmatch has been enabled.");
+            CreateTimer(2.0, EnableISDM);
+        }
+        else
+        {
+            PrintToChatAll("Ice Skate Deathmatch has been disabled.");
+            CreateTimer(2.0, DisableISDM);
+        }
     }
 }
 
@@ -1792,7 +1860,7 @@ public Action:DisableISDM(Handle Timer)
     RemoveISDM();
 }
 
-public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2) // Administrator/user menu for the gamemode
+public int ISDMServerMenu(Menu menu, MenuAction action, int param1, int param2) // Administrator/user menu for the gamemode
 {
     if (action == MenuAction_Select)
     {
@@ -1805,10 +1873,7 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2) // Adm
         }
 
         if (IsValidEntity(param1) && IsClientInGame(param1))
-        {
-
-            bool isPlyAdmin = ClientIsAdmin(param1);
-            
+        {      
             if (StrEqual(info, "ISDM_VoteSpeed"))
             {
                 ISDM_SpeedScaleMenu(param1, true);
@@ -1828,13 +1893,11 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2) // Adm
 
     if (action == MenuAction_DrawItem)
     {   
-        bool isPlyAdmin = ClientIsAdmin(param1);
-
         int style;
         char info[32];
         menu.GetItem(param2, info, sizeof(info), style);
 
-        if (!isPlyAdmin) // Hide administrator items from regular users
+        if (!ClientIsAdmin(param1)) // Hide administrator items from regular users
         {
             if (StrEqual(info, "ISDM_Toggle") || StrEqual(info, "ISDM_SpeedScale") || StrEqual(info, "ISDM_AutoSpeed"))
             {
@@ -1844,6 +1907,85 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2) // Adm
             {
                 return style;
             }          
+        }
+    }
+
+    if (action == MenuAction_End)
+    {
+        delete menu;
+    }
+}
+
+void ToggleCookie(int client, Handle cookie)
+{
+    char cookieRes[10];
+    GetClientCookie(client, cookie, cookieRes, 10);
+
+    if (StrEqual(cookieRes, "true"))
+    {
+        SetClientCookie(client, cookie, "false");
+    }
+    else
+    {
+        SetClientCookie(client, cookie, "true");
+    }
+}
+
+public int ISDMClientMenu(Menu menu, MenuAction action, int param1, int param2) // Administrator/user menu for the gamemode
+{
+    if (action == MenuAction_Select)
+    {
+        char info[32];
+        menu.GetItem(param2, info, sizeof(info));
+
+        if (IsValidEntity(param1) && IsClientInGame(param1))
+        {
+            if (StrEqual(info, "ISDM_Mats"))
+            {
+                ToggleCookie(param1, ISDM_ToggleMat);
+            }
+
+            if (StrEqual(info, "ISDM_SkateSnd"))
+            {
+                ToggleCookie(param1, ISDM_SndCookie);
+            }
+        }
+    }
+}
+
+public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2)
+{
+    if (action == MenuAction_Select)
+    {
+        char info[32];
+        menu.GetItem(param2, info, sizeof(info));
+
+        if (IsValidEntity(param1) && IsClientInGame(param1))
+        {
+            Menu newmenu;
+            if (StrEqual(info, "ISDM_Server"))
+            {
+                newmenu = new Menu(ISDMServerMenu, MENU_ACTIONS_ALL);
+                newmenu.SetTitle("Ice Skate Deathmatch", LANG_SERVER);
+                newmenu.AddItem("ISDM_Toggle", "Toggle ISDM");
+                newmenu.AddItem("ISDM_AutoSpeed", "Auto Speed Scale");
+                newmenu.AddItem("ISDM_SpeedScale", "Set Speed Scale");
+                newmenu.AddItem("ISDM_VoteSpeed", "Vote Speed Scale");
+                newmenu.ExitButton = true;
+                newmenu.Display(param1, 0);
+                delete menu;
+            }
+
+            if (StrEqual(info, "ISDM_Client"))
+            {
+                newmenu = new Menu(ISDMClientMenu, MENU_ACTIONS_ALL);
+                newmenu.SetTitle("Ice Skate Deathmatch", LANG_SERVER);
+                newmenu.AddItem("ISDM_Mats", "Toggle Materials");
+                newmenu.AddItem("ISDM_SkateSnd", "Toggle Skate Sounds");
+                newmenu.ExitButton = true;
+                newmenu.Display(param1, 0);
+                delete menu;
+            }
         }
     }
 
@@ -1875,17 +2017,24 @@ Action:ISDM_Menu(int client, int args) // Show gamemode's menu to user
 {
     Menu menu = new Menu(ISDMMenu, MENU_ACTIONS_ALL);
     menu.SetTitle("Ice Skate Deathmatch", LANG_SERVER);
-    menu.AddItem("ISDM_Toggle", "Toggle ISDM");
-    menu.AddItem("ISDM_AutoSpeed", "Auto Speed Scale");
-    menu.AddItem("ISDM_SpeedScale", "Set Speed Scale");
-    menu.AddItem("ISDM_VoteSpeed", "Vote Speed Scale");
+    menu.AddItem("ISDM_Server", "Server");
+    menu.AddItem("ISDM_Client", "Client");
     menu.ExitButton = true;
     menu.Display(client, 0);
 }
 
 void ISDM_SpeedScaleMenu(int client, bool isVoting) // Display wide range of speed multipliers to vote/set to by menu
 {
-    Menu menu = new Menu(ISDMSpeedScaleMenu, MENU_ACTIONS_ALL);
+    Menu menu;
+    
+    if (isVoting) 
+    {
+        menu = new Menu(ISDMSpeedScaleMenuVote, MENU_ACTIONS_ALL);
+    }
+    else
+    {
+        menu = new Menu(ISDMSpeedScaleMenu, MENU_ACTIONS_ALL);
+    }
 
     if (isVoting)
     {
