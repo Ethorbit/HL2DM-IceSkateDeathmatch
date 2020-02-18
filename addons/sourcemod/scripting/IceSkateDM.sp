@@ -102,6 +102,7 @@ float SPEED1SPEED;
 float SPEED2SPEED;
 float SPEED3SPEED;
 float SPEEDSCALE;
+float ISDM_PendingScale;
 
 float EstimateMapSize() // Get an estimation of how big the map is in case a speed scale has not yet been manually saved for the map
 {
@@ -371,7 +372,7 @@ void ISDM_NewSpeedScale(Handle:convar, const String:oldValue[], const String:new
     
     // Reset the skate amount as this cmd can really screw 
     // things up when changing from super high value to low:
-    for (int i = 0; i <= ISDM_MaxPlayers; i++)
+    for (int i = 1; i <= ISDM_MaxPlayers; i++)
     {
         if (IsValidEntity(i) && IsClientConnected(i))
         {
@@ -1289,22 +1290,9 @@ public Action:ISDM_SndHook(int[] clients, int& numClients, char sample[130], int
         volume = 1.0;
         level = SNDLVL_NORM;
         channel = SNDCHAN_AUTO;
-
-        //ISDM_ImpactSound(victim); // Function to replace the fall damage sound
         return Plugin_Changed;
     }
 }
-
-// void ISDM_ImpactSound(client) { // Replaces the fall damage sound with the new ice one
-//     if (!ISDMEnabled) return;
-
-//     new String:RandomImpact[][] = {"impact01.wav", "impact02.wav"};
-//     new String:SoundName[40];
-//     int RandomIndex = GetRandomInt(0, 1); 
-//     Format(SoundName, sizeof(SoundName), "IceSkateDM/%s", RandomImpact[RandomIndex]); // Randomly chooses between impact01 and impact02
-//     PrecacheSound(SoundName);
-//     EmitSoundToAll(SoundName, client, SNDCHAN_AUTO, SNDLVL_NORM, _, 1.0, _, _, _, _, _, _); // Plays the ice impact sound 
-// }
 
 void ISDM_SkateSound(client) { // Plays a random ice skate sound for skating players
     if (!ISDMEnabled) return;
@@ -1819,7 +1807,7 @@ void ISDM_SetAutoSpeed()
     equation = (equation > 1.0) ? 1.0 : equation;
 
     SetConVarFloat(ISDM_Speedscale, equation, false, false);
-    PrintToChatAll("Automatically set skating speed scale to: %.2f based off the map's estimated size (%.2f).", SPEEDSCALE, estSize / 100.0);
+    PrintToChatAll("[SM] Automatically set skating speed scale to: %.2f based off the map's estimated size (%.2f).", SPEEDSCALE, estSize / 100.0);
 }
 
 Action:ISDM_AutoSpeeds(int client, int args)
@@ -1837,12 +1825,12 @@ Action:ISDM_Toggle(int client, int args) // Toggle on/off gamemode from the game
         bool enableIt = !ISDMEnabled;
         if (enableIt)
         {
-            PrintToChatAll("Ice Skate Deathmatch has been enabled.");
+            PrintToChatAll("[SM] Admin enabled Ice Skate Deathmatch.");
             CreateTimer(2.0, EnableISDM);
         }
         else
         {
-            PrintToChatAll("Ice Skate Deathmatch has been disabled.");
+            PrintToChatAll("[SM] Admin disabled Ice Skate Deathmatch.");
             CreateTimer(2.0, DisableISDM);
         }
     }
@@ -1869,7 +1857,7 @@ public int ISDMServerMenu(Menu menu, MenuAction action, int param1, int param2) 
 
         if (StrEqual(info, "ISDM_Toggle"))
         {
-            ISDM_Toggle(param2, 0);
+            ISDM_Toggle(param1, 0);
         }
 
         if (IsValidEntity(param1) && IsClientInGame(param1))
@@ -1973,7 +1961,11 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2)
                 newmenu.AddItem("ISDM_VoteSpeed", "Vote Speed Scale");
                 newmenu.ExitButton = true;
                 newmenu.Display(param1, 0);
-                delete menu;
+                
+                if (IsValidHandle(menu))
+                {
+                    delete menu;
+                }
             }
 
             if (StrEqual(info, "ISDM_Client"))
@@ -1984,14 +1976,21 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2)
                 newmenu.AddItem("ISDM_SkateSnd", "Toggle Skate Sounds");
                 newmenu.ExitButton = true;
                 newmenu.Display(param1, 0);
-                delete menu;
+               
+                if (IsValidHandle(menu))
+                {
+                    delete menu;
+                }
             }
         }
     }
 
     if (action == MenuAction_End)
     {
-        delete menu;
+        if (IsValidHandle(menu))
+        {
+            delete menu;
+        }
     }
 }
 
@@ -2005,12 +2004,93 @@ public int ISDMVoteScale(Menu menu, MenuAction action, int param1, int param2)
 
 public int ISDMSpeedScaleMenu(Menu menu, MenuAction action, int param1, int param2)
 {
+    if (action == MenuAction_Select)
+    {
+        if (IsValidEntity(param1) && IsClientInGame(param1))
+        {
+            char val[4];
+            char info[4];
+            char msg[120];
+            for (float i = 0.1; i <= 2.1; i += 0.1) 
+            {
+                Format(val, 4, "%f", i);
+                menu.GetItem(param2, info, sizeof(info));
+                if (StrEqual(info, val))
+                {
+                    char mapName[64];
+                    GetCurrentMap(mapName, 64);
+                    PrintToChatAll("[SM] Admin saved Ice Skate Deathmatch's speed scale to %.1f for %s.", i, mapName);
+                    SetConVarFloat(ISDM_Speedscale, i, false, true);
+                }
+            }
+        }
+    }
 
+    if (action == MenuAction_End)
+    {
+        delete menu;
+    }
+}
+
+public int ISDMChangeScaleVote(Menu menu, MenuAction action, int param1, intparam2)
+{
+    if (action == MenuAction_VoteEnd)
+    {
+        if (param1 == 0)
+        {
+            SetConVarFloat(ISDM_Speedscale, ISDM_PendingScale, false, true);
+            PrintToChatAll("[SM] Ice Skate Deathmatch's speed scale changed to %.1f", ISDM_PendingScale);
+        }
+        else
+        {
+            PrintToChatAll("[SM] Vote to change the speed scale failed.");
+        }
+    }
+
+    if (action == MenuAction_End)
+    {
+        delete menu;
+    }
 }
 
 public int ISDMSpeedScaleMenuVote(Menu menu, MenuAction action, int param1, int param2)
 {
+    if (action == MenuAction_Select)
+    {
+        if (IsValidEntity(param1) && IsClientInGame(param1))
+        {
+            char info[4];
+            char val[4];
+            char name[32];
+            char msg[120];
+            GetClientName(param1, name, 32);
+            for (float i = 0.1; i <= 1.1; i += 0.1)
+            {
+                menu.GetItem(param2, info, sizeof(info));
+                Format(val, 4, "%f", i);
+                if (StrEqual(info, val))
+                {
+                    Format(msg, 120, "[SM] %s voted to change the Ice Skate Deathmatch's speed scale to %.1f", name, i);
+                    PrintToChatAll(msg);
+                    Menu newMenu = new Menu(ISDMChangeScaleVote);
 
+                    char title[50];
+                    Format(title, 50, "Change speed scale from %.1f to %.1f", GetConVarFloat(ISDM_Speedscale), i);
+                    ISDM_PendingScale = i;
+                    newMenu.SetTitle(title);
+                    newMenu.AddItem("yes", "Yes");
+                    newMenu.AddItem("no", "No");
+                    newMenu.DisplayVoteToAll(20);
+                }
+            }
+        }
+    }
+
+
+    if (action == MenuAction_End)
+    {
+        delete menu;
+    }
 }
 
 Action:ISDM_Menu(int client, int args) // Show gamemode's menu to user
@@ -2044,7 +2124,7 @@ void ISDM_SpeedScaleMenu(int client, bool isVoting) // Display wide range of spe
         {
             char selectName[50];
             Format(selectName, 50, "%.1f", i);
-            menu.AddItem("ISDM_SpeedScale", selectName);
+            menu.AddItem(selectName, selectName);
         }
     }
     else
@@ -2055,7 +2135,7 @@ void ISDM_SpeedScaleMenu(int client, bool isVoting) // Display wide range of spe
         {
             char selectName[50];
             Format(selectName, 50, "%.1f", i);
-            menu.AddItem("ISDM_SpeedScale", selectName);
+            menu.AddItem(selectName, selectName);
         }
     }
 
