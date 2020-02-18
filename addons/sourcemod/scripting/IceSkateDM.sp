@@ -95,6 +95,7 @@ bool PlayerIsBoosting[MAXPLAYERS + 1] = false;
 bool AllowNormalGravity[MAXPLAYERS + 1] = false;
 bool PlyOnWaterProp[MAXPLAYERS + 1] = false;
 bool PlyTouchingWaterProp[MAXPLAYERS + 1] = false;
+bool AdminIsSavingMap[MAXPLAYERS + 1] = false;
 new String:RenderedMaterial[MAXPLAYERS + 1][60];
 float MAXSLOWSPEED;
 float MAXAIRHEIGHT;
@@ -171,6 +172,7 @@ public ISDM_ResetPlyStats(client) {
     AllowNormalGravity[client] = false;
     PlyOnWaterProp[client] = false;
     PlyTouchingWaterProp[client] = false;
+    AdminIsSavingMap[client] = false;
 }
 
 public OnClientDisconnect_Post(client) { // When a player leaves it is important to reset the client index's statistics
@@ -208,6 +210,7 @@ public void OnPluginStart() { // OnMapStart() will not be called by just simply 
     RegConsoleCmd("ISDM", ISDM_Menu);
     RegAdminCmd("ISDM_Toggle", ISDM_Toggle, ADMFLAG_BAN, "Toggle on/off the Ice Skate Deathmatch gamemode at run-time.");
     RegAdminCmd("ISDM_AutoSpeed", ISDM_AutoSpeeds, ADMFLAG_BAN, "Reset skate speed for the current map to the automated values.");
+    RegAdminCmd("ISDM_SaveSpeed", ISDM_SaveSpeed, ADMFLAG_BAN, "Permanently save a speed scale for the current map or the specified map name.")
     ISDM_ToggleMat = RegClientCookie("ISDM_ToggleMats", "Toggle on/off the rendering of Ice Skate Deathmatch materials.", CookieAccess_Public);
     ISDM_SndCookie = RegClientCookie("ISDM_ToggleSounds", "Toggle on/off the ice skating sounds for Ice Skate Deathmatch.", CookieAccess_Public);
     ISDM_Initialize();
@@ -365,7 +368,7 @@ public void OnGameFrame() {
     }
 }
 
-void ISDM_NewSpeedScale(Handle:convar, const String:oldValue[], const String:newValue[])  // Will auto change based on map-saved/auto-saved speed scales
+void ISDM_NewSpeedScale(Handle:convar, const String:oldValue[], const String:newValue[])  // Will auto change based on map-saved/auto-saved speed scales & votes
 {
     SPEEDSCALE = GetConVarFloat(FindConVar("ISDM_SpeedScale"));
     SetConVarFloat(FindConVar("phys_timescale"), 1.0 + SPEEDSCALE, false, false); // A necessity because of how fast players can go now
@@ -1818,6 +1821,92 @@ Action:ISDM_AutoSpeeds(int client, int args)
     }
 }
 
+void ISDM_SaveSpeedForMap(int client, char mapname[64], float speedScale) 
+{
+    bool proceed = false;
+    if (speedScale < 0.1)
+    {
+        if (IsValidEntity(client) && IsClientConnected(client))
+        {
+            PrintToChat(client, "[SM] The speed scale cannot be under 0.1!");
+            return;
+        }
+        else
+        {
+            PrintToServer("[SM] The speed scale cannot be under 0.1!");
+            return;
+        }
+    }
+    else
+    {
+        char curMap[64];
+        GetCurrentMap(curMap, 64);
+        if (StrEqual(mapname, curMap)) // Don't check if the map is valid because we know it is
+        {
+            proceed = true;
+        }
+        else
+        {
+            DirectoryListing dirList = OpenDirectory("maps");
+
+            char filename[64];
+            FileType ft;
+            while (dirList.GetNext(filename, 64, ft)) // Iterate all map names in the maps folder to see if the provided map name is valid
+            {
+                if (StrContains(mapname, ".bsp") == -1) // Only match the bsp extension if the user actually provided one
+                {
+                    ReplaceString(filename, 64, ".bsp", "", false);
+                }
+
+                if (StrEqual(filename, mapname)) // The provided map name is in the server's maps folder
+                {
+                    proceed = true;
+                    break;
+                }
+            }
+        }
+
+        
+        if (proceed) // The map is valid, save the speed scale to it
+        {
+            PrintToChatAll("[SM] Admin saved Ice Skate Deathmatch's speed scale to %.1f for %s.", speedScale, mapname);
+        }
+        else
+        {
+            if (IsValidEntity(client) && IsClientConnected(client))
+            {
+                PrintToChat(client, "[SM] The provided map name could not be found!");
+            }
+            else
+            {
+                PrintToServer("[SM] The provided map name could not be found!");
+            }
+        }
+    }
+}
+
+Action:ISDM_SaveSpeed(int client, int args)
+{
+    char val[32];
+    GetCmdArg(1, val, 32);
+
+    if (ClientIsAdmin(client))
+    {
+        if (args == 1) // They want to save speed for the current map
+        {
+            char mapName[64];
+            GetCurrentMap(mapName, 64);
+            ISDM_SaveSpeedForMap(client, mapName, StringToFloat(val));
+        }
+        else // They are passing a map name to save the speed for
+        {
+            char mapName[64];
+            GetCmdArg(2, mapName, 64);
+            ISDM_SaveSpeedForMap(client, mapName, StringToFloat(val));
+        }
+    }
+}
+
 Action:ISDM_Toggle(int client, int args) // Toggle on/off gamemode from the gamemode's menu or console/chat
 {
     if (ClientIsAdmin(client))
@@ -1869,6 +1958,13 @@ public int ISDMServerMenu(Menu menu, MenuAction action, int param1, int param2) 
             
             if (StrEqual(info, "ISDM_SpeedScale"))
             {
+                AdminIsSavingMap[param1] = false;
+                ISDM_SpeedScaleMenu(param1, false);
+            }
+
+            if (StrEqual(info, "ISDM_SaveSpeedScale"))
+            {
+                AdminIsSavingMap[param1] = true;
                 ISDM_SpeedScaleMenu(param1, false);
             }
 
@@ -1937,6 +2033,11 @@ public int ISDMClientMenu(Menu menu, MenuAction action, int param1, int param2) 
             {
                 ToggleCookie(param1, ISDM_SndCookie);
             }
+
+            if (StrEqual(info, "ISDM_ListCmds"))
+            {
+
+            }
         }
     }
 }
@@ -1958,6 +2059,7 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2)
                 newmenu.AddItem("ISDM_Toggle", "Toggle ISDM");
                 newmenu.AddItem("ISDM_AutoSpeed", "Auto Speed Scale");
                 newmenu.AddItem("ISDM_SpeedScale", "Set Speed Scale");
+                newmenu.AddItem("ISDM_SaveSpeedScale", "Save Speed Scale");
                 newmenu.AddItem("ISDM_VoteSpeed", "Vote Speed Scale");
                 newmenu.ExitButton = true;
                 newmenu.Display(param1, 0);
@@ -1972,7 +2074,8 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2)
             {
                 newmenu = new Menu(ISDMClientMenu, MENU_ACTIONS_ALL);
                 newmenu.SetTitle("Ice Skate Deathmatch", LANG_SERVER);
-                newmenu.AddItem("ISDM_Mats", "Toggle Materials");
+                newmenu.AddItem("ISDM_ListCmds", "List ISDM Commands");
+                newmenu.AddItem("ISDM_Mats", "Toggle ISDM Materials");
                 newmenu.AddItem("ISDM_SkateSnd", "Toggle Skate Sounds");
                 newmenu.ExitButton = true;
                 newmenu.Display(param1, 0);
@@ -2010,17 +2113,23 @@ public int ISDMSpeedScaleMenu(Menu menu, MenuAction action, int param1, int para
         {
             char val[4];
             char info[4];
-            char msg[120];
             for (float i = 0.1; i <= 2.1; i += 0.1) 
             {
                 Format(val, 4, "%f", i);
                 menu.GetItem(param2, info, sizeof(info));
                 if (StrEqual(info, val))
                 {
-                    char mapName[64];
-                    GetCurrentMap(mapName, 64);
-                    PrintToChatAll("[SM] Admin saved Ice Skate Deathmatch's speed scale to %.1f for %s.", i, mapName);
-                    SetConVarFloat(ISDM_Speedscale, i, false, true);
+                    if (!AdminIsSavingMap[param1])
+                    {
+                        PrintToChatAll("[SM] Admin changed Ice Skate Deathmatch's speed scale to %.1f.", i);
+                        SetConVarFloat(ISDM_Speedscale, i, false, true);
+                    }
+                    else
+                    {
+                        char mapName[64];
+                        GetCurrentMap(mapName, 64);
+                        ISDM_SaveSpeedForMap(param1, mapName, i);
+                    }
                 }
             }
         }
