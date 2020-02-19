@@ -9,14 +9,17 @@ public Plugin:myinfo =
 	name = "Ice Skate Deathmatch",
 	author = "Ethorbit",
 	description = "Greatly changes the way deathmatch is played introducing new techniques & perks",
-	version = "1.4.0",
-	url = ""
+	version = "1.4.3",
+    url = ""
 }
 
 #include <sdktools>
 #include <sdkhooks>
 #include <convars>
 #include <clientprefs>
+
+char dbError[255];
+Database db = INVALID_HANDLE;
 
 new String:ISDM_Materials[][63] = { // The materials the gamemode uses
     "1speedperk", 
@@ -207,6 +210,9 @@ public void OnMapStart() { // OnPluginStart() does NOT run every map change resu
 }
 
 public void OnPluginStart() { // OnMapStart() will not be called by just simply reloading the plugin
+    //SQL_DefConnect(dbError, 255);
+    db = SQL_Connect("iceskatedm", false, dbError, 255);
+    
     RegConsoleCmd("ISDM", ISDM_Menu);
     RegAdminCmd("ISDM_Toggle", ISDM_Toggle, ADMFLAG_BAN, "Toggle on/off the Ice Skate Deathmatch gamemode at run-time.");
     RegAdminCmd("ISDM_AutoSpeed", ISDM_AutoSpeeds, ADMFLAG_BAN, "Reset skate speed for the current map to the automated values.");
@@ -236,6 +242,11 @@ public void OnClientConnected(int client)
 public void OnPluginEnd() 
 {
     RemoveISDM();
+
+    if (IsValidHandle(db))
+    {
+        CloseHandle(db);
+    }
 }
 
 public void OnMapEnd()
@@ -1821,12 +1832,85 @@ Action:ISDM_AutoSpeeds(int client, int args)
     }
 }
 
+void AppendScale(char mapname[64], float speedScale)
+{
+    StrCat(mapname, 64, " = "); // This will separate the map name and the map's speed scale
+
+    if (!DirExists("cfg/sourcemod/IceSkateDM")) // Make sure the directory exists before writing to file
+    {
+        CreateDirectory("cfg/sourcemod/IceSkateDM", 3);
+    }
+
+    bool exists = false;
+    Handle lineChars = CreateArray(120);
+    char lineTxt[120];
+
+    if (!FileExists("cfg/sourcemod/IceSkateDM/MapSpeedScales.txt"))
+    {
+        Handle open = OpenFile("cfg/sourcemod/IceSkateDM/MapSpeedScales.txt", "w");
+        CloseHandle(open);
+    }
+    Handle speeds = OpenFile("cfg/sourcemod/IceSkateDM/MapSpeedScales.txt", "r");
+    while (!IsEndOfFile(speeds))
+    {   
+        ReadFileLine(speeds, lineTxt, sizeof(lineTxt));
+        PrintToServer("%s is not %s", lineTxt, mapname);
+        if (StrContains(lineTxt, mapname) == -1) // This line doesn't contain the map name, add it to the line array
+        {
+            if (strlen(lineTxt) > 0)
+            {
+                PushArrayString(lineChars, lineTxt);
+            }
+        }
+        else
+        {
+            exists = true;
+        }
+    }
+
+    CloseHandle(speeds);
+
+    if (!exists) // The map does not have a saved value yet, just add a new line
+    {
+        Handle openFile = OpenFile("cfg/sourcemod/IceSkateDM/MapSpeedScales.txt", "a");
+        PrintToChatAll("Nope");
+        WriteFileLine(openFile, "%s%.1f", mapname, speedScale);
+        CloseHandle(openFile);
+    }
+    else // Replace the file with all the lines but the one that exists, THEN add a new line
+    {
+        // Recreate the file
+        Handle open = OpenFile("cfg/sourcemod/IceSkateDM/MapSpeedScales.txt", "w");
+        CloseHandle(open);
+        
+        Handle openFile = OpenFile("cfg/sourcemod/IceSkateDM/MapSpeedScales.txt", "a");
+        // Add all the values as before, except for the one we are changing
+        for (int i = 0; i < GetArraySize(lineChars); i++)
+        {
+            char ArrRes[120];
+            GetArrayString(lineChars, i, ArrRes, 120);
+            PrintToChatAll("TEST");
+
+            if (strlen(ArrRes) > 0)
+            {
+                WriteFileLine(openFile, ArrRes);
+            }
+        }
+
+        WriteFileLine(openFile, mapname, speedScale); // Finally, add the new map's speed scale
+        CloseHandle(openFile);
+    }
+
+    CloseHandle(lineChars);
+}
+
 void ISDM_SaveSpeedForMap(int client, char mapname[64], float speedScale) 
 {
+    bool isClient = IsValidEntity(client) && IsClientConnected(client);
     bool proceed = false;
     if (speedScale < 0.1)
     {
-        if (IsValidEntity(client) && IsClientConnected(client))
+        if (isClient)
         {
             PrintToChat(client, "[SM] The speed scale cannot be under 0.1!");
             return;
@@ -1866,14 +1950,46 @@ void ISDM_SaveSpeedForMap(int client, char mapname[64], float speedScale)
             }
         }
 
-        
         if (proceed) // The map is valid, save the speed scale to it
         {
+            if (!IsValidHandle(db)) // Failed to establish connection with database
+            {
+                PrintToServer("[SM] Failed to save value (%s)", dbError);
+
+                if (isClient)
+                {
+                    PrintToChat(client, "[SM] Failed to save value (%s)", dbError);
+                }
+
+                db = SQL_Connect("iceskatedm", false, dbError, 255);
+            }
+            else // The database connection works
+            {
+                SQL_FastQuery(db, "CREATE TABLE isdm_savedscales (mapname VARCHAR(64), speed_scale float)");
+
+                char sqlBuf[255];
+                SQL_FormatQuery(db, sqlBuf, 255, "SELECT EXISTS(SELECT speed_scale FROM isdm_savedscales WHERE mapname = '%s')", mapname);
+                Handle TableHasValue = SQL_Query(db, sqlBuf);
+                if (SQL_FetchRow(TableHasValue) > 0 && SQL_FetchInt(TableHasValue, 0) == 0) // The map's scale has not been saved yet, insert one
+                {
+                    // SQL_FetchInt(TableHasValue, 0) == 0
+                    SQL_FormatQuery(db, sqlBuf, 255, "INSERT isdm_savedscales VALUES('%s', %.1f)", mapname, speedScale);
+                    SQL_FastQuery(db, sqlBuf);
+                }
+                else // The map's scale has already been saved, update it
+                {
+                    SQL_FormatQuery(db, sqlBuf, 255, "UPDATE isdm_savedscales SET speed_scale = %.1f WHERE mapname = '%s'", speedScale, mapname);
+                    SQL_FastQuery(db, sqlBuf);
+                }
+
+                CloseHandle(TableHasValue);
+            }
+
             PrintToChatAll("[SM] Admin saved Ice Skate Deathmatch's speed scale to %.1f for %s.", speedScale, mapname);
         }
         else
         {
-            if (IsValidEntity(client) && IsClientConnected(client))
+            if (isClient)
             {
                 PrintToChat(client, "[SM] The provided map name could not be found!");
             }
