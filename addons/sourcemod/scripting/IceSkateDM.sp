@@ -1,8 +1,7 @@
 // Ice Skate Deathmatch is a thing now thanks to Himanshu's choice of commands :)
 // TODO: 
-// 1. Add gamemode info somehow 
-// 2. Fix gun noises from cutting off from the fast firing code
-// 3. Fix fall sound from cutting off
+// 1. Fix gun noises from cutting off from the fast firing code
+// 2. Fix fall sound from cutting off
 
 public Plugin:myinfo =
 {
@@ -219,7 +218,7 @@ public void OnPluginStart() { // OnMapStart() will not be called by just simply 
     db = SQL_Connect("iceskatedm", false, dbError, 255); // Connect to the SQL database so that admins can manually save map speeds
     RegConsoleCmd("ISDM", ISDM_Menu);
     RegAdminCmd("ISDM_Toggle", ISDM_Toggle, ADMFLAG_BAN, "Toggle on/off the Ice Skate Deathmatch gamemode at run-time.");
-    RegAdminCmd("ISDM_AutoSpeed", ISDM_AutoSpeeds, ADMFLAG_BAN, "Reset skate speed for the current map to the automated values.");
+    RegAdminCmd("ISDM_AutoSpeed", ISDM_AutoSpeeds, ADMFLAG_BAN, "Automate the speed scale for Ice Skate Deathmatch based off of the estimated map size");
     RegAdminCmd("ISDM_SaveSpeed", ISDM_SaveSpeed, ADMFLAG_BAN, "Permanently save a speed scale for the current map or the specified map name.");
     RegAdminCmd("ISDM_SetSpeed", ISDM_SetSpeed, ADMFLAG_BAN, "Set the speed scale for the current map.");
     ISDM_ToggleMat = RegClientCookie("ISDM_ToggleMats", "Toggle on/off the rendering of Ice Skate Deathmatch materials.", CookieAccess_Public);
@@ -2164,7 +2163,57 @@ public int ISDMClientMenu(Menu menu, MenuAction action, int param1, int param2) 
 
             if (StrEqual(info, "ISDM_ListCmds"))
             {
+                PrintToChat(param1, "[SM] Check the console for the list of commands.");
+                PrintToConsole(param1, "Serverside:");
+                PrintToConsole(param1, "ISDM_Toggle - Toggle on/off the Ice Skate Deathmatch gamemode at run-time.");
+                PrintToConsole(param1, "ISDM_AutoSpeed - Automate the speed scale for Ice Skate Deathmatch based off of the estimated map size");
+                PrintToConsole(param1, "ISDM_SaveSpeed - Permanently save a speed scale for the current map or the specified map name.");
+                PrintToConsole(param1, "ISDM_SetSpeed - Set the speed scale for the current map.");
+                PrintToConsole(param1, "Clientside:");
+                PrintToConsole(param1, "ISDM - Menu for Ice Skate Deathmatch.");
+                PrintToConsole(param1, "ISDM_ToggleMats - Toggle on/off the rendering of Ice Skate Deathmatch materials.");
+                PrintToConsole(param1, "ISDM_ToggleSounds - Toggle on/off the ice skating sounds for Ice Skate Deathmatch.");
+            }
 
+            if (StrEqual(info, "ISDM_ListChanges"))
+            {
+                PrintToChat(param1, "[SM] Check the console for the list of changes.");
+                PrintToConsole(param1, "NEW MATERIALS:");
+                PrintToConsole(param1, "Adds perk icons on the top left of a player's screen when that perk is active.");
+                PrintToConsole(param1, "Adds arrows indicating which way to move to gain speed near the player's crosshair.");
+
+                PrintToConsole(param1, "\n PERKS:");
+                PrintToConsole(param1, "IcePerk - Increases skating speed scale and changes player color to light blue")
+                PrintToConsole(param1, "FastPerk1 - Auto lift all props nearby and changes player color to blue.");
+                PrintToConsole(param1, "FastPerk2 - Instakill players you run into and changes player color to dark blue.");
+                PrintToConsole(param1, "FastPerk3 - Become immune to orbs, props and rockets and changes player color to darkest blue.");
+                PrintToConsole(param1, "AirPerk - Deal slightly more damage (damage boost depends on the weapon) and changes player color to red.");
+
+                PrintToConsole(param1, "\n NEW MOVEMENT MECHANICS:");
+                PrintToConsole(param1, "Gain speed in the direction you are going skate by going left, right (or right, left) repeatedly, there is a speed cap in place and it depends on what the map's speed scale is set at.");
+                PrintToConsole(param1, "The speed boost power given also depends on what the map's speed scale is set at");
+
+                PrintToConsole(param1, "\n EXPLOSIVE BOOSTING:");
+                PrintToConsole(param1, "The bigger the blast, the bigger the boost.");
+
+                PrintToConsole(param1, "\n WATER SLIDING:");
+                PrintToConsole(param1, "Players can slide on top of water brushes which gives them the IcePerk");
+
+                PrintToConsole(param1, "\n AUTOMATIC PROP LIFTING:");
+                PrintToConsole(param1, "Only occurs near players who have the FastPerk1 perk, will not lift a prop that was recently shot by a gravity gun.");
+
+                PrintToConsole(param1, "\n EXISTING STUFF THAT WAS MODIFIED:");
+                PrintToConsole(param1, "Jumping - Disabled completely.")
+                PrintToConsole(param1, "Sprinting - Does nothing once the player is moving at a fast speed.");
+                PrintToConsole(param1, "Footsteps - Replaced with ice skate sounds.");
+                PrintToConsole(param1, "Friction & Acceleration - Allows sliding and easy mid-air turning.");
+                PrintToConsole(param1, "Gravity gun power - Allows farther pulling and harder pushing.");
+                PrintToConsole(param1, "Gravity - The higher you go, the higher gravity becomes with the exception that you're not explosive boosting. Gravity is normal when inside a trigger_push entity");
+                PrintToConsole(param1, "Reload & fire speed - Speeds are based on the speed perk you have otherwise they are default speeds.");
+                PrintToConsole(param1, "Physics speed - The higher the speed scale is, the faster physics speeds are.");
+                PrintToConsole(param1, "Explosive damage to self - The damage is reduced to allow explosive boosting.");
+                PrintToConsole(param1, "Prop damage to self - Disabled completely to avoid high speed prop collision suicides.");
+                PrintToConsole(param1, "Fall damage - Disabled completely (With the exception of triggers that deal fall damage).");
             }
         }
     }
@@ -2203,6 +2252,7 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2)
                 newmenu = new Menu(ISDMClientMenu, MENU_ACTIONS_ALL);
                 newmenu.SetTitle("Ice Skate Deathmatch", LANG_SERVER);
                 newmenu.AddItem("ISDM_ListCmds", "List ISDM Commands");
+                newmenu.AddItem("ISDM_ListChanges", "List Changes");
                 newmenu.AddItem("ISDM_Mats", "Toggle ISDM Materials");
                 newmenu.AddItem("ISDM_SkateSnd", "Toggle Skate Sounds");
                 newmenu.ExitButton = true;
