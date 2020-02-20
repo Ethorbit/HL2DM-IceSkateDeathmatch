@@ -5,6 +5,7 @@
 // 3. Fix jump jitteriness
 // 4. Remove slams
 // 5. Fix weird hopping that occurs when on top of a prop
+// 6. Add a stop movement button
 
 public Plugin:myinfo =
 {
@@ -1266,7 +1267,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             } 
             
             if (GetEntPropFloat(client, Prop_Data, "m_flMaxspeed") == 190.0) { 
-               //SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
+               SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
             }
 
             if (buttons & IN_JUMP) {
@@ -2150,7 +2151,7 @@ public int ISDMServerMenu(Menu menu, MenuAction action, int param1, int param2) 
                 ISDM_SpeedScaleMenu(param1, false);
             }
 
-            if (StrEqual(info, "ISDM_SaveSpeedScale"))
+            if (StrEqual(info, "ISDM_SaveSpeed"))
             {
                 AdminIsSavingMap[param1] = true;
                 ISDM_SpeedScaleMenu(param1, false);
@@ -2171,7 +2172,7 @@ public int ISDMServerMenu(Menu menu, MenuAction action, int param1, int param2) 
 
         if (!ClientIsAdmin(param1)) // Hide administrator items from regular users
         {
-            if (StrEqual(info, "ISDM_Toggle") || StrEqual(info, "ISDM_SpeedScale") || StrEqual(info, "ISDM_AutoSpeed"))
+            if (StrEqual(info, "ISDM_Toggle") || StrEqual(info, "ISDM_SpeedScale") || StrEqual(info, "ISDM_AutoSpeed") || StrEqual(info, "ISDM_SaveSpeed"))
             {
                 return ITEMDRAW_DISABLED;
             }
@@ -2218,8 +2219,8 @@ public Action:ISDM_ListChanges(int client, int args)
     PrintToConsole(client, "AirPerk - Deal slightly more damage (damage boost depends on the weapon) and changes player color to red.");
 
     PrintToConsole(client, "\n NEW MOVEMENT MECHANICS:");
-    PrintToConsole(client, "Gain speed in the direction you are going skate by going left, right (or right, left) repeatedly, there is a speed cap in place and it depends on what the map's speed scale is set at.");
-    PrintToConsole(client, "The speed boost power given also depends on what the map's speed scale is set at");
+    PrintToConsole(client, "Gain speed in the direction you are going to skate by going left, right (or right, left) repeatedly, there is a speed cap in place and it depends on what the map's speed scale is set at.");
+    PrintToConsole(client, "The speed boost power given also depends on the scale.");
 
     PrintToConsole(client, "\n EXPLOSIVE BOOSTING:");
     PrintToConsole(client, "The bigger the blast, the bigger the boost.");
@@ -2309,7 +2310,7 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2)
                 newmenu.AddItem("ISDM_Toggle", "Toggle ISDM");
                 newmenu.AddItem("ISDM_AutoSpeed", "Auto Speed Scale");
                 newmenu.AddItem("ISDM_SpeedScale", "Set Speed Scale");
-                newmenu.AddItem("ISDM_SaveSpeedScale", "Save Speed Scale");
+                newmenu.AddItem("ISDM_SaveSpeed", "Save Speed Scale");
                 newmenu.AddItem("ISDM_VoteSpeed", "Vote Speed Scale");
                 newmenu.ExitButton = true;
                 newmenu.Display(param1, 0);
