@@ -3,6 +3,8 @@
 // 1. Fix gun noises from cutting off from the fast firing code
 // 2. Fix fall sound from cutting off
 // 3. Fix jump jitteriness
+// 4. Remove slams
+// 5. Fix weird hopping that occurs when on top of a prop
 
 public Plugin:myinfo =
 {
@@ -224,6 +226,7 @@ public void OnPluginStart() { // OnMapStart() will not be called by just simply 
     RegAdminCmd("ISDM_AutoSpeed", ISDM_AutoSpeeds, ADMFLAG_BAN, "Automate the speed scale for Ice Skate Deathmatch based off of the estimated map size.");
     RegAdminCmd("ISDM_SaveSpeed", ISDM_SaveSpeed, ADMFLAG_BAN, "Permanently save a speed scale for the current map or the specified map name.");
     RegAdminCmd("ISDM_SetSpeed", ISDM_SetSpeed, ADMFLAG_BAN, "Set the speed scale for the current map.");
+    RegAdminCmd("ISDM_DeleteSpeed", ISDM_DeleteSpeed, ADMFLAG_BAN, "Allow auto speeds again for the map by deleting the saved map scale entry.");
     ISDM_ToggleMat = RegClientCookie("ISDM_ToggleMats", "Toggle on/off the rendering of Ice Skate Deathmatch materials.", CookieAccess_Public);
     ISDM_SndCookie = RegClientCookie("ISDM_ToggleSounds", "Toggle on/off the ice skating sounds for Ice Skate Deathmatch.", CookieAccess_Public);
     ISDM_Initialize();
@@ -303,32 +306,48 @@ void ISDM_SetConVars()
 
 void AllowAutoSpeed() // Allow gamemode to automate speeds if an admin has not manually saved the speed this map
 {
-    char mapname[64];
-    GetCurrentMap(mapname, 64);
-
-    char sqlBuf[255];
-    SQL_FormatQuery(db, sqlBuf, 255, "SELECT EXISTS(SELECT speed_scale FROM isdm_savedscales WHERE mapname = '%s')", mapname);
-    Handle TableHasValue = SQL_Query(db, sqlBuf);
-    
-    if (!IsValidHandle(db) || SQL_FetchRow(TableHasValue) > 0 && SQL_FetchInt(TableHasValue, 0) == 0) 
+    if (!IsValidHandle(db)) // Failed to establish connection with database
     {
         setAutoSpeed = true;
+        PrintToServer("[SM] Failed to get manually saved speed scales (%s)", dbError);
+        db = SQL_Connect("iceskatedm", false, dbError, 255);
     }
-    else // The speed was saved
+    else
     {
-        setAutoSpeed = false;
-        SQL_FormatQuery(db, sqlBuf, 255, "SELECT speed_scale FROM isdm_savedscales WHERE mapname = '%s'", mapname);
-        Handle GetMapScale = SQL_Query(db, sqlBuf);
+        char mapname[64];
+        GetCurrentMap(mapname, 64);
 
-        if (SQL_FetchRow(GetMapScale) > 0)
+        char sqlBuf[255];
+        SQL_FormatQuery(db, sqlBuf, 255, "SELECT EXISTS(SELECT speed_scale FROM isdm_savedscales WHERE mapname = '%s')", mapname);
+        Handle TableHasValue = SQL_Query(db, sqlBuf);
+        
+        if (!IsValidHandle(TableHasValue))
         {
-            MANUALSPEED = PrecisionFix(SQL_FetchFloat(GetMapScale, 0));
+            setAutoSpeed = true;
+            PrintToChatAll("[SM] Was able to connect to a valid database but ran into a problem reading from it (%s)", dbError);
+            return;
         }
 
-        CloseHandle(GetMapScale);
-    }
+        if (!IsValidHandle(db) || SQL_FetchRow(TableHasValue) > 0 && SQL_FetchInt(TableHasValue, 0) == 0) 
+        { 
+            setAutoSpeed = true;
+        }
+        else // The speed was saved
+        {
+            setAutoSpeed = false;
+            SQL_FormatQuery(db, sqlBuf, 255, "SELECT speed_scale FROM isdm_savedscales WHERE mapname = '%s'", mapname);
+            Handle GetMapScale = SQL_Query(db, sqlBuf);
 
-    CloseHandle(TableHasValue);
+            if (SQL_FetchRow(GetMapScale) > 0)
+            {
+                MANUALSPEED = PrecisionFix(SQL_FetchFloat(GetMapScale, 0));
+            }
+
+            CloseHandle(GetMapScale);
+        }
+
+        CloseHandle(TableHasValue);
+    }
 }
 
 void ISDM_Initialize() 
@@ -1976,10 +1995,16 @@ void ISDM_SaveSpeedForMap(int client, char mapname[64], float speedScale)
             else // The database connection works
             {
                 SQL_FastQuery(db, "CREATE TABLE isdm_savedscales (mapname VARCHAR(64), speed_scale DOUBLE)");
-
                 char sqlBuf[255];
                 SQL_FormatQuery(db, sqlBuf, 255, "SELECT EXISTS(SELECT speed_scale FROM isdm_savedscales WHERE mapname = '%s')", mapname);
                 Handle TableHasValue = SQL_Query(db, sqlBuf);
+
+                if (!IsValidHandle(TableHasValue))
+                {
+                    PrintToChatAll("[SM] Was able to connect to a valid database but ran into a problem reading from it (%s)", dbError);
+                    return;
+                }
+                
                 if (SQL_FetchRow(TableHasValue) > 0 && SQL_FetchInt(TableHasValue, 0) == 0) // The map's scale has not been saved yet, insert one
                 {
                     SQL_FormatQuery(db, sqlBuf, 255, "INSERT isdm_savedscales VALUES('%s', %.2f)", mapname, speedScale);
@@ -1992,10 +2017,10 @@ void ISDM_SaveSpeedForMap(int client, char mapname[64], float speedScale)
                 }
 
                 CloseHandle(TableHasValue);
-            }
 
-            PrintToServer("[SM] Admin saved Ice Skate Deathmatch's speed scale to %.2f for %s.", speedScale, mapname);
-            PrintToChatAll("[SM] Admin saved Ice Skate Deathmatch's speed scale to %.2f for %s.", speedScale, mapname);
+                PrintToServer("[SM] Admin saved Ice Skate Deathmatch's speed scale to %.2f for %s.", speedScale, mapname);
+                PrintToChatAll("[SM] Admin saved Ice Skate Deathmatch's speed scale to %.2f for %s.", speedScale, mapname);
+            }
         }
         else
         {
@@ -2043,6 +2068,29 @@ Action:ISDM_SaveSpeed(int client, int args)
             char mapName[64];
             GetCmdArg(2, mapName, 64);
             ISDM_SaveSpeedForMap(client, mapName, fixedVal);
+        }
+    }
+}
+
+Action:ISDM_DeleteSpeed(int client, int args)
+{
+    char mapname[64];
+    GetCmdArg(1, mapname, 64);
+
+    if (IsValidHandle(db))
+    {
+        char sqlBuf[255];
+        SQL_FormatQuery(db, sqlBuf, 255, "SELECT EXISTS(SELECT speed_scale FROM isdm_savedscales WHERE mapname = '%s')", mapname);
+        Handle TableHasValue = SQL_Query(db, sqlBuf);
+        if (SQL_FetchRow(TableHasValue) > 0 && SQL_FetchInt(TableHasValue, 0) == 1) // The map is saved in the database
+        {
+            SQL_FormatQuery(db, sqlBuf, 255, "DELETE FROM isdm_savedscales WHERE mapname = '%s';", mapname);
+            SQL_FastQuery(db, sqlBuf);
+            PrintToChat(client, "[SM] Successfully removed the map's scale from the database.");
+        }
+        else
+        {
+            PrintToChat(client, "[SM] The map name could not be found in the database.");
         }
     }
 }
