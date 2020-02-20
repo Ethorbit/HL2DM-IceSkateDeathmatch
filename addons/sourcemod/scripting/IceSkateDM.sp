@@ -21,6 +21,8 @@ public Plugin:myinfo =
 char dbError[255];
 Database db = INVALID_HANDLE;
 
+stock float PrecisionFix(float decVal) { return decVal + 0.001; } // Just adds a small enough amount to prevent float precision off by 0.1
+
 new String:ISDM_Materials[][63] = { // The materials the gamemode uses
     "1speedperk", 
     "1speedperkandair", 
@@ -90,6 +92,8 @@ int ElapsedRightTime[MAXPLAYERS + 1] = 0;
 float PlySkates[MAXPLAYERS + 1] = 0.0;
 float PlyInitialHeight[MAXPLAYERS + 1] = 0.0;
 float PlyDistAboveGround[MAXPLAYERS + 1] = 0.0;
+bool announcedSpeed = false;
+bool setAutoSpeed = false;
 bool ISDMEnabled = true;
 bool SkatedLeft[MAXPLAYERS + 1] = false;
 bool SkatedRight[MAXPLAYERS + 1] = false;
@@ -107,6 +111,7 @@ float SPEED2SPEED;
 float SPEED3SPEED;
 float SPEEDSCALE;
 float ISDM_PendingScale;
+float MANUALSPEED = 0.0;
 
 float EstimateMapSize() // Get an estimation of how big the map is in case a speed scale has not yet been manually saved for the map
 {
@@ -205,18 +210,18 @@ enum PerkConVars
 new ISDM_Perks[Perks];
 new ISDM_PerkVars[PerkConVars];
 
-public void OnMapStart() { // OnPluginStart() does NOT run every map change resulting in file downloads never taking place!
+public void OnMapStart() 
+{ 
     ISDM_Initialize();
 }
 
 public void OnPluginStart() { // OnMapStart() will not be called by just simply reloading the plugin
-    //SQL_DefConnect(dbError, 255);
-    db = SQL_Connect("iceskatedm", false, dbError, 255);
-    
+    db = SQL_Connect("iceskatedm", false, dbError, 255); // Connect to the SQL database so that admins can manually save map speeds
     RegConsoleCmd("ISDM", ISDM_Menu);
     RegAdminCmd("ISDM_Toggle", ISDM_Toggle, ADMFLAG_BAN, "Toggle on/off the Ice Skate Deathmatch gamemode at run-time.");
     RegAdminCmd("ISDM_AutoSpeed", ISDM_AutoSpeeds, ADMFLAG_BAN, "Reset skate speed for the current map to the automated values.");
-    RegAdminCmd("ISDM_SaveSpeed", ISDM_SaveSpeed, ADMFLAG_BAN, "Permanently save a speed scale for the current map or the specified map name.")
+    RegAdminCmd("ISDM_SaveSpeed", ISDM_SaveSpeed, ADMFLAG_BAN, "Permanently save a speed scale for the current map or the specified map name.");
+    RegAdminCmd("ISDM_SetSpeed", ISDM_SetSpeed, ADMFLAG_BAN, "Set the speed scale for the current map.");
     ISDM_ToggleMat = RegClientCookie("ISDM_ToggleMats", "Toggle on/off the rendering of Ice Skate Deathmatch materials.", CookieAccess_Public);
     ISDM_SndCookie = RegClientCookie("ISDM_ToggleSounds", "Toggle on/off the ice skating sounds for Ice Skate Deathmatch.", CookieAccess_Public);
     ISDM_Initialize();
@@ -289,8 +294,42 @@ void ISDM_SetConVars()
     SetConVarFloat(FindConVar("physcannon_pullforce"), 10000.0, false, false); // Allow players to pull stuff 2.5x farther (not much of a difference)
 }
 
+void AllowAutoSpeed() // Allow gamemode to automate speeds if an admin has not manually saved the speed this map
+{
+    char mapname[64];
+    GetCurrentMap(mapname, 64);
+
+    char sqlBuf[255];
+    SQL_FormatQuery(db, sqlBuf, 255, "SELECT EXISTS(SELECT speed_scale FROM isdm_savedscales WHERE mapname = '%s')", mapname);
+    Handle TableHasValue = SQL_Query(db, sqlBuf);
+    
+    if (!IsValidHandle(db) || SQL_FetchRow(TableHasValue) > 0 && SQL_FetchInt(TableHasValue, 0) == 0) 
+    {
+        setAutoSpeed = true;
+    }
+    else // The speed was saved
+    {
+        setAutoSpeed = false;
+        SQL_FormatQuery(db, sqlBuf, 255, "SELECT speed_scale FROM isdm_savedscales WHERE mapname = '%s'", mapname);
+        Handle GetMapScale = SQL_Query(db, sqlBuf);
+
+        if (SQL_FetchRow(GetMapScale) > 0)
+        {
+            MANUALSPEED = PrecisionFix(SQL_FetchFloat(GetMapScale, 0));
+        }
+
+        CloseHandle(GetMapScale);
+    }
+
+    CloseHandle(TableHasValue);
+}
+
 void ISDM_Initialize() 
 {
+    announcedSpeed = false; // Allow the speed to be automated or have speed preset loaded
+    MANUALSPEED = 0.0; // Important or the map will be using the previous map's manually saved speed!
+    AllowAutoSpeed();
+
     ISDM_SetConVars();
     ISDM_MaxPlayers = GetMaxClients(); 
     ISDM_PerkVars[SlowPerkSpeedConVar] = CreateConVar("ISDM_SlowPerkSpeed", "210.0", "The maximum speed players can go to get Slow Perk", FCVAR_SERVER_CAN_EXECUTE);
@@ -367,6 +406,24 @@ public void OnGameFrame() {
                     ISDM_IsHooked[i] = true;
                 }
 
+                if (!announcedSpeed)
+                {
+                    if (setAutoSpeed)
+                    {
+                        if (IsPlayerAlive(i) && IsClientConnected(i) && IsClientAuthorized(i))
+                        {
+                            announcedSpeed = true;
+                            CreateTimer(5.0, AutoSpeedGreet, 0);
+                        }
+                    }
+
+                    if (MANUALSPEED > 0.0) // An admin has manually saved a speed scale for the map
+                    {
+                        announcedSpeed = true;
+                        CreateTimer(5.0, ManualSpeedGreet, 0);
+                    }
+                }
+
                 if (!IsPlayerAlive(i)) {
                     ClientCommand(i, "r_screenoverlay 0"); // Reset perks since they died
                 }
@@ -377,6 +434,17 @@ public void OnGameFrame() {
             }
         }
     }
+}
+
+public Action:AutoSpeedGreet(Handle:timer, any:client)
+{
+    ISDM_SetAutoSpeed();
+}
+
+public Action:ManualSpeedGreet(Handle:timer, any:client)
+{
+    PrintToChatAll("[SM] Set Ice Skate Deathmatch's speed scale to %.2f (This scale was manually saved by an admin).", MANUALSPEED);
+    SetConVarFloat(ISDM_Speedscale, MANUALSPEED, false, false);
 }
 
 void ISDM_NewSpeedScale(Handle:convar, const String:oldValue[], const String:newValue[])  // Will auto change based on map-saved/auto-saved speed scales & votes
@@ -1797,6 +1865,7 @@ public Action:GetClosestPlyToProj(Handle:timer, any:entity) { // Calculates the 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 stock bool ClientIsAdmin(int client)
 {
+    if (client == 0) return false;
     bool isPlyAdmin = false;
    
     if (IsValidEntity(client && IsClientInGame(client)))
@@ -1820,93 +1889,21 @@ void ISDM_SetAutoSpeed()
     equation = (equation < 0.1) ? 0.1 : equation;
     equation = (equation > 1.0) ? 1.0 : equation;
 
-    SetConVarFloat(ISDM_Speedscale, equation, false, false);
-    PrintToChatAll("[SM] Automatically set skating speed scale to: %.2f based off the map's estimated size (%.2f).", SPEEDSCALE, estSize / 100.0);
+    SetConVarFloat(ISDM_Speedscale, PrecisionFix(equation), false, false);
+    PrintToChatAll("[SM] Automatically set skating speed scale to: %.2f based off the map's estimated size (%.2f). Change in !ISDM.", SPEEDSCALE, estSize / 100.0);
 }
 
 Action:ISDM_AutoSpeeds(int client, int args)
 {
-    if (ClientIsAdmin(client))
+    if (ClientIsAdmin(client) || client == 0)
     {
         ISDM_SetAutoSpeed();
     }
 }
 
-void AppendScale(char mapname[64], float speedScale)
-{
-    StrCat(mapname, 64, " = "); // This will separate the map name and the map's speed scale
-
-    if (!DirExists("cfg/sourcemod/IceSkateDM")) // Make sure the directory exists before writing to file
-    {
-        CreateDirectory("cfg/sourcemod/IceSkateDM", 3);
-    }
-
-    bool exists = false;
-    Handle lineChars = CreateArray(120);
-    char lineTxt[120];
-
-    if (!FileExists("cfg/sourcemod/IceSkateDM/MapSpeedScales.txt"))
-    {
-        Handle open = OpenFile("cfg/sourcemod/IceSkateDM/MapSpeedScales.txt", "w");
-        CloseHandle(open);
-    }
-    Handle speeds = OpenFile("cfg/sourcemod/IceSkateDM/MapSpeedScales.txt", "r");
-    while (!IsEndOfFile(speeds))
-    {   
-        ReadFileLine(speeds, lineTxt, sizeof(lineTxt));
-        PrintToServer("%s is not %s", lineTxt, mapname);
-        if (StrContains(lineTxt, mapname) == -1) // This line doesn't contain the map name, add it to the line array
-        {
-            if (strlen(lineTxt) > 0)
-            {
-                PushArrayString(lineChars, lineTxt);
-            }
-        }
-        else
-        {
-            exists = true;
-        }
-    }
-
-    CloseHandle(speeds);
-
-    if (!exists) // The map does not have a saved value yet, just add a new line
-    {
-        Handle openFile = OpenFile("cfg/sourcemod/IceSkateDM/MapSpeedScales.txt", "a");
-        PrintToChatAll("Nope");
-        WriteFileLine(openFile, "%s%.1f", mapname, speedScale);
-        CloseHandle(openFile);
-    }
-    else // Replace the file with all the lines but the one that exists, THEN add a new line
-    {
-        // Recreate the file
-        Handle open = OpenFile("cfg/sourcemod/IceSkateDM/MapSpeedScales.txt", "w");
-        CloseHandle(open);
-        
-        Handle openFile = OpenFile("cfg/sourcemod/IceSkateDM/MapSpeedScales.txt", "a");
-        // Add all the values as before, except for the one we are changing
-        for (int i = 0; i < GetArraySize(lineChars); i++)
-        {
-            char ArrRes[120];
-            GetArrayString(lineChars, i, ArrRes, 120);
-            PrintToChatAll("TEST");
-
-            if (strlen(ArrRes) > 0)
-            {
-                WriteFileLine(openFile, ArrRes);
-            }
-        }
-
-        WriteFileLine(openFile, mapname, speedScale); // Finally, add the new map's speed scale
-        CloseHandle(openFile);
-    }
-
-    CloseHandle(lineChars);
-}
-
 void ISDM_SaveSpeedForMap(int client, char mapname[64], float speedScale) 
 {
-    bool isClient = IsValidEntity(client) && IsClientConnected(client);
+    bool isClient = client != 0 && IsValidEntity(client) && IsClientConnected(client);
     bool proceed = false;
     if (speedScale < 0.1)
     {
@@ -1928,6 +1925,7 @@ void ISDM_SaveSpeedForMap(int client, char mapname[64], float speedScale)
         if (StrEqual(mapname, curMap)) // Don't check if the map is valid because we know it is
         {
             proceed = true;
+            SetConVarFloat(ISDM_Speedscale, speedScale, false, true);
         }
         else
         {
@@ -1965,27 +1963,27 @@ void ISDM_SaveSpeedForMap(int client, char mapname[64], float speedScale)
             }
             else // The database connection works
             {
-                SQL_FastQuery(db, "CREATE TABLE isdm_savedscales (mapname VARCHAR(64), speed_scale float)");
+                SQL_FastQuery(db, "CREATE TABLE isdm_savedscales (mapname VARCHAR(64), speed_scale DOUBLE)");
 
                 char sqlBuf[255];
                 SQL_FormatQuery(db, sqlBuf, 255, "SELECT EXISTS(SELECT speed_scale FROM isdm_savedscales WHERE mapname = '%s')", mapname);
                 Handle TableHasValue = SQL_Query(db, sqlBuf);
                 if (SQL_FetchRow(TableHasValue) > 0 && SQL_FetchInt(TableHasValue, 0) == 0) // The map's scale has not been saved yet, insert one
                 {
-                    // SQL_FetchInt(TableHasValue, 0) == 0
-                    SQL_FormatQuery(db, sqlBuf, 255, "INSERT isdm_savedscales VALUES('%s', %.1f)", mapname, speedScale);
+                    SQL_FormatQuery(db, sqlBuf, 255, "INSERT isdm_savedscales VALUES('%s', %.2f)", mapname, speedScale);
                     SQL_FastQuery(db, sqlBuf);
                 }
                 else // The map's scale has already been saved, update it
                 {
-                    SQL_FormatQuery(db, sqlBuf, 255, "UPDATE isdm_savedscales SET speed_scale = %.1f WHERE mapname = '%s'", speedScale, mapname);
+                    SQL_FormatQuery(db, sqlBuf, 255, "UPDATE isdm_savedscales SET speed_scale = %.2f WHERE mapname = '%s'", speedScale, mapname);
                     SQL_FastQuery(db, sqlBuf);
                 }
 
                 CloseHandle(TableHasValue);
             }
 
-            PrintToChatAll("[SM] Admin saved Ice Skate Deathmatch's speed scale to %.1f for %s.", speedScale, mapname);
+            PrintToServer("[SM] Admin saved Ice Skate Deathmatch's speed scale to %.2f for %s.", speedScale, mapname);
+            PrintToChatAll("[SM] Admin saved Ice Skate Deathmatch's speed scale to %.2f for %s.", speedScale, mapname);
         }
         else
         {
@@ -2001,24 +1999,38 @@ void ISDM_SaveSpeedForMap(int client, char mapname[64], float speedScale)
     }
 }
 
+Action:ISDM_SetSpeed(int client, int args)
+{
+    if (ClientIsAdmin(client) || client == 0)
+    {
+        char val[32];
+        GetCmdArg(1, val, 32);
+        float newVal = PrecisionFix(StringToFloat(val));
+        PrintToServer("[SM] Admin set Ice Skate Deathmatch's speed scale to %.2f.", newVal);
+        PrintToChatAll("[SM] Admin set Ice Skate Deathmatch's speed scale to %.2f.", newVal);
+        SetConVarFloat(ISDM_Speedscale, newVal, false, true);
+    }
+}
+
 Action:ISDM_SaveSpeed(int client, int args)
 {
     char val[32];
     GetCmdArg(1, val, 32);
+    float fixedVal = PrecisionFix(StringToFloat(val));
 
-    if (ClientIsAdmin(client))
+    if (ClientIsAdmin(client) || client == 0)
     {
         if (args == 1) // They want to save speed for the current map
         {
             char mapName[64];
             GetCurrentMap(mapName, 64);
-            ISDM_SaveSpeedForMap(client, mapName, StringToFloat(val));
+            ISDM_SaveSpeedForMap(client, mapName, fixedVal);
         }
         else // They are passing a map name to save the speed for
         {
             char mapName[64];
             GetCmdArg(2, mapName, 64);
-            ISDM_SaveSpeedForMap(client, mapName, StringToFloat(val));
+            ISDM_SaveSpeedForMap(client, mapName, fixedVal);
         }
     }
 }
@@ -2237,7 +2249,7 @@ public int ISDMSpeedScaleMenu(Menu menu, MenuAction action, int param1, int para
                 {
                     if (!AdminIsSavingMap[param1])
                     {
-                        PrintToChatAll("[SM] Admin changed Ice Skate Deathmatch's speed scale to %.1f.", i);
+                        PrintToChatAll("[SM] Admin changed Ice Skate Deathmatch's speed scale to %.2f.", i);
                         SetConVarFloat(ISDM_Speedscale, i, false, true);
                     }
                     else
@@ -2264,7 +2276,7 @@ public int ISDMChangeScaleVote(Menu menu, MenuAction action, int param1, intpara
         if (param1 == 0)
         {
             SetConVarFloat(ISDM_Speedscale, ISDM_PendingScale, false, true);
-            PrintToChatAll("[SM] Ice Skate Deathmatch's speed scale changed to %.1f", ISDM_PendingScale);
+            PrintToChatAll("[SM] Ice Skate Deathmatch's speed scale changed to %.2f", ISDM_PendingScale);
         }
         else
         {
@@ -2295,12 +2307,12 @@ public int ISDMSpeedScaleMenuVote(Menu menu, MenuAction action, int param1, int 
                 Format(val, 4, "%f", i);
                 if (StrEqual(info, val))
                 {
-                    Format(msg, 120, "[SM] %s voted to change the Ice Skate Deathmatch's speed scale to %.1f", name, i);
+                    Format(msg, 120, "[SM] %s voted to change the Ice Skate Deathmatch's speed scale to %.2f", name, i);
                     PrintToChatAll(msg);
                     Menu newMenu = new Menu(ISDMChangeScaleVote);
 
                     char title[50];
-                    Format(title, 50, "Change speed scale from %.1f to %.1f", GetConVarFloat(ISDM_Speedscale), i);
+                    Format(title, 50, "Change speed scale from %.2f to %.2f", GetConVarFloat(ISDM_Speedscale), i);
                     ISDM_PendingScale = i;
                     newMenu.SetTitle(title);
                     newMenu.AddItem("yes", "Yes");
@@ -2348,7 +2360,7 @@ void ISDM_SpeedScaleMenu(int client, bool isVoting) // Display wide range of spe
         for (float i = 0.1; i <= 1.1; i += 0.1)
         {
             char selectName[50];
-            Format(selectName, 50, "%.1f", i);
+            Format(selectName, 50, "%.2f", i);
             menu.AddItem(selectName, selectName);
         }
     }
@@ -2359,7 +2371,7 @@ void ISDM_SpeedScaleMenu(int client, bool isVoting) // Display wide range of spe
         for (float i = 0.1; i <= 2.1; i += 0.1) // Let admins have the ability to change scale past maximum allowed
         {
             char selectName[50];
-            Format(selectName, 50, "%.1f", i);
+            Format(selectName, 50, "%.2f", i);
             menu.AddItem(selectName, selectName);
         }
     }
