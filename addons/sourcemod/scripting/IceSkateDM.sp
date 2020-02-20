@@ -226,7 +226,7 @@ public void OnPluginStart() { // OnMapStart() will not be called by just simply 
     ISDM_Initialize();
 }
 
-public void OnClientConnected(int client)
+public void OnClientConnected(int client) // Make sure client cookies actually have a default value
 {
     char matCookie[5], sndCookie[5];
     GetClientCookie(client, ISDM_ToggleMat, matCookie, 5);
@@ -277,12 +277,17 @@ void RemoveISDM() // Reset the server back to normal like the plugin was never l
             ISDM_ResetPlyStats(i);
             ISDM_DeleteWaterProp(i);
             ClientCommand(i, "r_screenoverlay 0");
+            SDKUnhook(i, SDKHook_OnTakeDamage, ISDM_PlyTookDmg);
+            SDKUnhook(i, SDKHook_Touch, ISDM_Touched);
         }
     }
 }
 
 void ISDM_SetConVars()
 {
+    announcedSpeed = false; // Allow the speed to be automated or have speed preset loaded
+    MANUALSPEED = 0.0; // Important or the map will be using the previous map's manually saved speed!
+    AllowAutoSpeed();
     SetConVarInt(FindConVar("sv_footsteps"), 0, false, false); // Footstep sounds are replaced with skating sounds
     SetConVarFloat(FindConVar("sv_friction"), 0.8, false, false); // No other way found so far to allow players to slide :(
     SetConVarFloat(FindConVar("sv_accelerate"), 100.0, false, false); // Very much optional, playable without it
@@ -325,10 +330,7 @@ void AllowAutoSpeed() // Allow gamemode to automate speeds if an admin has not m
 
 void ISDM_Initialize() 
 {
-    announcedSpeed = false; // Allow the speed to be automated or have speed preset loaded
-    MANUALSPEED = 0.0; // Important or the map will be using the previous map's manually saved speed!
-    AllowAutoSpeed();
-
+    if (!ISDMEnabled) return;
     ISDM_SetConVars();
     ISDM_MaxPlayers = GetMaxClients(); 
     ISDM_PerkVars[SlowPerkSpeedConVar] = CreateConVar("ISDM_SlowPerkSpeed", "210.0", "The maximum speed players can go to get Slow Perk", FCVAR_SERVER_CAN_EXECUTE);
@@ -396,39 +398,42 @@ void ISDM_DelFromArray(Handle:array, item) {
 }
 
 public void OnGameFrame() {
-    for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
-        if (IsValidEntity(i)) {
-            if (IsClientInGame(i)) {  
-                if (ISDM_IsHooked[i] == false) { // Ensure that the player is ALWAYS hooked even if plugin is reloaded
-                    SDKHook(i, SDKHook_OnTakeDamage, ISDM_PlyTookDmg);
-                    SDKHook(i, SDKHook_Touch, ISDM_Touched);
-                    ISDM_IsHooked[i] = true;
-                }
+    if (ISDMEnabled)
+    {
+        for (new i = 1; i <= ISDM_MaxPlayers; i++) { // Loop through each player
+            if (IsValidEntity(i)) {
+                if (IsClientInGame(i)) {  
+                    if (ISDM_IsHooked[i] == false) { // Ensure that the player is ALWAYS hooked even if plugin is reloaded
+                        SDKHook(i, SDKHook_OnTakeDamage, ISDM_PlyTookDmg);
+                        SDKHook(i, SDKHook_Touch, ISDM_Touched);
+                        ISDM_IsHooked[i] = true;
+                    }
 
-                if (!announcedSpeed)
-                {
-                    if (setAutoSpeed)
+                    if (!announcedSpeed)
                     {
-                        if (IsPlayerAlive(i) && IsClientConnected(i) && IsClientAuthorized(i))
+                        if (setAutoSpeed)
+                        {
+                            if (IsPlayerAlive(i) && IsClientConnected(i) && IsClientAuthorized(i))
+                            {
+                                announcedSpeed = true;
+                                CreateTimer(5.0, AutoSpeedGreet, 0);
+                            }
+                        }
+
+                        if (MANUALSPEED > 0.0) // An admin has manually saved a speed scale for the map
                         {
                             announcedSpeed = true;
-                            CreateTimer(5.0, AutoSpeedGreet, 0);
+                            CreateTimer(5.0, ManualSpeedGreet, 0);
                         }
                     }
 
-                    if (MANUALSPEED > 0.0) // An admin has manually saved a speed scale for the map
-                    {
-                        announcedSpeed = true;
-                        CreateTimer(5.0, ManualSpeedGreet, 0);
+                    if (!IsPlayerAlive(i)) {
+                        ClientCommand(i, "r_screenoverlay 0"); // Reset perks since they died
                     }
-                }
-
-                if (!IsPlayerAlive(i)) {
-                    ClientCommand(i, "r_screenoverlay 0"); // Reset perks since they died
-                }
-            
-                if (IsPlayerAlive(i)) {
-                    ISDM_UpdatePerks(i);
+                
+                    if (IsPlayerAlive(i)) {
+                        ISDM_UpdatePerks(i);
+                    }
                 }
             }
         }
@@ -508,6 +513,7 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
 
     // Props will be flying crazy in all directions and players will run into them at extreme speeds, so disable PVE prop damage:
     if (damagetype & DMG_CRUSH) { // DMG_CRUSH is prop damage
+        if (!ISDMEnabled) return Plugin_Continue;
         damage = 0.0; 
         
         if (IsValidEntity(attacker)) {
@@ -522,11 +528,13 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
     }
 
     if (damagetype & DMG_FALL) { // Disable disgusting fall damage     
+        if (!ISDMEnabled) return Plugin_Continue;
         damage = 0.0;
         return Plugin_Changed;
     }
 
     if (damagetype & DMG_BLAST) {
+        if (!ISDMEnabled) return Plugin_Continue;
         if (attacker == victim) {
             new String:PlyWepClass[32];
             int PlyWep = GetEntPropEnt(victim, Prop_Data, "m_hActiveWeapon");
@@ -548,6 +556,7 @@ public Action:ISDM_PlyTookDmg(victim, &attacker, &inflictor, &Float:damage, &dam
 
 
     if (attacker > 0 && attacker < ISDM_MaxPlayers) { // If there is an attacker
+        if (!ISDMEnabled) return Plugin_Continue;
         new String:attackerweapon[32];
         GetClientWeapon(attacker, attackerweapon, 32);
 
@@ -1360,6 +1369,8 @@ void ISDM_MuteSkateSounds(client) { // Stops emitting ice skate sounds from a cl
 
 public Action:ISDM_SndHook(int[] clients, int& numClients, char sample[130], int& entity, int& channel, float& volume, int& level, int& pitch, int& flags, char[] soundEntry, int& seed)
 {
+    if (!ISDMEnabled) return Plugin_Continue;
+
     if (StrEqual(sample, "player/pl_fallpain1.wav") || StrEqual(sample, "player/pl_fallpain3.wav"))
     {
         new String:RandomImpact[][] = {"impact01.wav", "impact02.wav"};
@@ -2251,7 +2262,7 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2)
             {
                 newmenu = new Menu(ISDMClientMenu, MENU_ACTIONS_ALL);
                 newmenu.SetTitle("Ice Skate Deathmatch", LANG_SERVER);
-                newmenu.AddItem("ISDM_ListCmds", "List ISDM Commands");
+                newmenu.AddItem("ISDM_ListCmds", "List Commands");
                 newmenu.AddItem("ISDM_ListChanges", "List Changes");
                 newmenu.AddItem("ISDM_Mats", "Toggle ISDM Materials");
                 newmenu.AddItem("ISDM_SkateSnd", "Toggle Skate Sounds");
