@@ -313,8 +313,6 @@ public ISDM_DBQuery(Database:db, DBResultSet:results, const char[] error, any:da
 
     if (StrEqual(QueryType, "GetSpeed"))
     {
-        PrintToChatAll("K GETSPEED DID WORK");
-
         if (results.FetchRow() && results.FetchInt(0) == 0) 
         { 
             setAutoSpeed = true;
