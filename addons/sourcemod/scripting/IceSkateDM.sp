@@ -6,6 +6,11 @@
 // 4. Remove slams
 // 5. Fix weird hopping that occurs when on top of a prop
 // 6. Add a stop movement button
+// 7. Fix players becoming immune to explosives after noclipping
+// 8. Fix weird waterprop error on dm_airfusion_final & dm_magnum where it is rotated 90 degrees and blocks the player from passing even when there is no water
+// 9. Fix waterprop endless bouncing issue on dm_jag-dod_wakeisland1942_v1
+// 10. Add back button for submenus of !ISDM so that players don't have to do !ISDM every time
+// 11. Use threaded queries instead of fast queries to prevent server lag when saving/deleting/reading map speeds
 
 public Plugin:myinfo =
 {
@@ -683,7 +688,7 @@ public void ISDM_BoostPlayer(client, String:Weapon[]) {
             ScaleVector(direction, GetRandomFloat(500.0, 1000.0)); 
             PlyVel[2] = GetRandomFloat(900.0, 1500.0);
             AddVectors(PlyVel, direction, PlyVel);
-        } else if (strcmp(Weapon, "weapon_rpg") == 0) { // SMG1 grenade blasted  
+        } else if (strcmp(Weapon, "weapon_rpg") == 0) { // RPG blasted  
             ScaleVector(direction, GetRandomFloat(1000.0, 1500.0)); 
             PlyVel[2] = GetRandomFloat(1500.0, 2000.0);
             AddVectors(PlyVel, direction, PlyVel);
@@ -1267,7 +1272,7 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
             } 
             
             if (GetEntPropFloat(client, Prop_Data, "m_flMaxspeed") == 190.0) { 
-               SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
+               //SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
             }
 
             if (buttons & IN_JUMP) {
@@ -2140,6 +2145,11 @@ public int ISDMServerMenu(Menu menu, MenuAction action, int param1, int param2) 
 
         if (IsValidEntity(param1) && IsClientInGame(param1))
         {      
+            if (StrEqual(info, "ISDM_Back"))
+            {
+                ISDM_Menu(param1, 0);
+            }
+
             if (StrEqual(info, "ISDM_VoteSpeed"))
             {
                 ISDM_SpeedScaleMenu(param1, true);
@@ -2270,6 +2280,11 @@ public int ISDMClientMenu(Menu menu, MenuAction action, int param1, int param2) 
 
         if (IsValidEntity(param1) && IsClientInGame(param1))
         {
+            if (StrEqual(info, "ISDM_Back"))
+            {
+                ISDM_Menu(param1, 0);
+            }
+
             if (StrEqual(info, "ISDM_Mats"))
             {
                 ToggleCookie(param1, ISDM_ToggleMat);
@@ -2307,6 +2322,7 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2)
             {
                 newmenu = new Menu(ISDMServerMenu, MENU_ACTIONS_ALL);
                 newmenu.SetTitle("Ice Skate Deathmatch", LANG_SERVER);
+                newmenu.AddItem("ISDM_Back", "<---");
                 newmenu.AddItem("ISDM_Toggle", "Toggle ISDM");
                 newmenu.AddItem("ISDM_AutoSpeed", "Auto Speed Scale");
                 newmenu.AddItem("ISDM_SpeedScale", "Set Speed Scale");
@@ -2325,6 +2341,7 @@ public int ISDMMenu(Menu menu, MenuAction action, int param1, int param2)
             {
                 newmenu = new Menu(ISDMClientMenu, MENU_ACTIONS_ALL);
                 newmenu.SetTitle("Ice Skate Deathmatch", LANG_SERVER);
+                newmenu.AddItem("ISDM_Back", "<---");
                 newmenu.AddItem("ISDM_ListCmds", "List Commands");
                 newmenu.AddItem("ISDM_ListChanges", "List Changes");
                 newmenu.AddItem("ISDM_Mats", "Toggle ISDM Materials");
