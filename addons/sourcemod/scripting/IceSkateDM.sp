@@ -3,12 +3,11 @@
 // 1. Fix gun noises from cutting off from the fast firing code
 // 2. Fix fall sound from cutting off
 // 3. Fix jump jitteriness
-// 4. Remove slams
-// 5. Fix weird hopping that occurs when on top of a prop
-// 6. Add a stop movement button
-// 7. Fix players becoming immune to explosives after noclipping
-// 8. Fix weird waterprop bug on dm_airfusion_final & dm_magnum where it is rotated 90 degrees and blocks the player from passing even when there is no water
-// 9. Fix waterprop endless bouncing issue on dm_jag-dod_wakeisland1942_v1
+// 4. Fix weird hopping that occurs when on top of a prop
+// 5. Fix players becoming immune to explosives after noclipping
+// 6. Fix weird waterprop bug on dm_airfusion_final & dm_magnum where it is rotated 90 degrees and blocks the player from passing even when there is no water
+// 7. Fix waterprop endless bouncing issue on dm_jag-dod_wakeisland1942_v1
+// 8. Fix unfair vote scale where the percentage needed to press yes is low
 
 public Plugin:myinfo =
 {
@@ -222,11 +221,14 @@ public void OnMapStart()
 
     for (int i = 0; i <= GetMaxEntities(); i++) // Remove all slams
     {
-        char classname[32];
-        GetEntityClassname(i, classname, 32);
-        if (strcmp(classname, "weapon_slam") == 0) 
+        if (IsValidEntity(i))
         {
-            RemoveEntity(i);
+            char classname[32];
+            GetEntityClassname(i, classname, 32);
+            if (strcmp(classname, "weapon_slam") == 0) 
+            {
+                RemoveEntity(i);
+            }
         }
     }
 }
@@ -397,6 +399,7 @@ void RemoveISDM() // Reset the server back to normal like the plugin was never l
     SetConVarFloat(FindConVar("physcannon_minforce"), 700.0, false, false); 
     SetConVarFloat(FindConVar("physcannon_maxforce"), 1500.0, false, false);
     SetConVarFloat(FindConVar("physcannon_pullforce"), 4000.0, false, false);
+    
     //ServerCommand("exec autoexec.cfg"); 
 
     for (int i = 1; i <= ISDM_MaxPlayers; i++)
@@ -1369,8 +1372,21 @@ public Action:OnPlayerRunCmd(client, int& buttons, int& impulse, float vel[3], f
                //SetEntPropFloat(client, Prop_Data, "m_flSuitPower", 101.0); // If you go over 100.0 aux power it breaks the aux hud thus hiding it like we want
             }
 
-            if (buttons & IN_JUMP) {
+            if (buttons & IN_JUMP && !NotOnGround) // Replace jumping with the ability to stop sliding
+            { 
                 buttons &= ~IN_JUMP;
+                PlySkates[client] = 0.0; // Remove their speed boosts
+                float stopVel[3]; // Stop their velocity
+                stopVel[0] = currentSpeed[0] / 2;
+                stopVel[1] = currentSpeed[1] / 2;
+                stopVel[2] = currentSpeed[2];
+
+                float stopPos[3]; // Teleporting them at the same pos will ensure all friction sliding is cancelled
+                stopPos[0] = currentPos[0];
+                stopPos[1] = currentPos[1];
+                stopPos[2] = currentPos[2]; 
+                TeleportEntity(client, stopPos, NULL_VECTOR, stopVel);
+
                 return Plugin_Continue;        
             } 
 
@@ -2326,6 +2342,7 @@ public Action:ISDM_ListChanges(int client, int args)
     PrintToConsole(client, "Explosive damage to self - The damage is reduced to allow explosive boosting.");
     PrintToConsole(client, "Prop damage to self - Disabled completely to avoid high speed prop collision suicides.");
     PrintToConsole(client, "Fall damage - Disabled completely (With the exception of triggers that deal fall damage).");
+    PrintToConsole(client, "Weapon_slams - little shits are auto removed");
 }
 
 public Action:ISDM_ListCmds(int client, int args)
