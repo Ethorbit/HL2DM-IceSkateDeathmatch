@@ -219,6 +219,16 @@ new ISDM_PerkVars[PerkConVars];
 public void OnMapStart() 
 { 
     ISDM_Initialize();
+
+    for (int i = 0; i <= GetMaxEntities(); i++) // Remove all slams
+    {
+        char classname[32];
+        GetEntityClassname(i, classname, 32);
+        if (strcmp(classname, "weapon_slam") == 0) 
+        {
+            RemoveEntity(i);
+        }
+    }
 }
 
 public void OnPluginStart() { // OnMapStart() will not be called by just simply reloading the plugin
@@ -1863,12 +1873,19 @@ bool ISDM_GetPerk(client, perk) {
 public void OnEntityCreated(entity, const String:classname[]) {
     if (!ISDMEnabled) return;
 
-    if (IsValidEntity(entity)) {  
-        if (strcmp(classname, "prop_combine_ball", false) == 0) { // Make AR2 orb speed scale with speed perks
+    if (IsValidEntity(entity)) { 
+        if (strcmp(classname, "weapon_slam") == 0) // Remove slams as soon as they are created
+        {
+            RemoveEntity(entity);
+        }
+
+        if (strcmp(classname, "prop_combine_ball", false) == 0)  // Make AR2 orb speed scale with speed perks
+        {
             CreateTimer(0.2, GetClosestPlyToProj, entity);
         }
 
-        if (strcmp(classname, "trigger_push") == 0) { // Hook trigger_push entities for collision detection
+        if (strcmp(classname, "trigger_push") == 0) // Hook trigger_push entities for collision detection
+        { 
             SDKHook(entity, SDKHook_StartTouch, ISDM_TriggerTouch);
             SDKHook(entity, SDKHook_EndTouchPost, ISDM_TriggerLeave);
         }
